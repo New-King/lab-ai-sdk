@@ -22,10 +22,46 @@ export type ProjectFile = {
 
 export type FollowStep = {
   description: string;
-  command?: string;
-  copyText?: string;
-  copyLabel?: string;
+  command: string;
 };
+
+/** 生成 mkdir + touch 脚手架命令（仅 create 的文件） */
+export function buildScaffoldCommand(files: ProjectFile[]): string | null {
+  const sorted = [...files]
+    .filter((file) => file.order != null && file.action === "create")
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+
+  if (sorted.length === 0) return null;
+
+  const dirs = new Set<string>();
+  const newFiles: string[] = [];
+
+  for (const file of sorted) {
+    newFiles.push(file.path);
+    const slash = file.path.lastIndexOf("/");
+    if (slash > 0) dirs.add(file.path.slice(0, slash));
+  }
+
+  const parts: string[] = [];
+  if (dirs.size > 0) {
+    parts.push(`mkdir -p ${[...dirs].sort().join(" ")}`);
+  }
+  parts.push(`touch ${newFiles.join(" ")}`);
+  return parts.join(" && ");
+}
+
+/** 跟做步骤：一条命令创建文件夹和空文件 */
+export function getFollowSteps(files: ProjectFile[]): FollowStep[] {
+  const command = buildScaffoldCommand(files);
+  if (!command) return [];
+
+  return [
+    {
+      description: `新增文件指令：在 ${PROJECT_DIR} 目录执行。代码在下方「相关文件」里逐个复制粘贴。`,
+      command,
+    },
+  ];
+}
 
 export type GuideProject = {
   kind: "guide";
@@ -55,44 +91,6 @@ export function getOrderLabel(order: number) {
 
 export function getFileActionLabel(action: FileAction) {
   return action === "replace" ? "覆盖" : "新建";
-}
-
-/** 从文件列表生成跟做步骤（mkdir → 逐文件粘贴 → pnpm dev） */
-export function getFollowSteps(files: ProjectFile[]): FollowStep[] {
-  const sorted = [...files]
-    .filter((file) => file.order != null && file.action != null)
-    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-
-  const dirs = new Set<string>();
-  for (const file of sorted) {
-    const slash = file.path.lastIndexOf("/");
-    if (slash > 0) dirs.add(file.path.slice(0, slash));
-  }
-
-  const steps: FollowStep[] = [];
-
-  if (dirs.size > 0) {
-    steps.push({
-      description: `在 ${PROJECT_DIR} 目录创建本课需要的文件夹。`,
-      command: `mkdir -p ${[...dirs].join(" ")}`,
-    });
-  }
-
-  for (const file of sorted) {
-    const verb = getFileActionLabel(file.action!);
-    steps.push({
-      description: `${verb} ${file.path}${file.hint ? `（${file.hint}）` : ""}，粘贴代码。`,
-      copyText: file.code,
-      copyLabel: file.path,
-    });
-  }
-
-  steps.push({
-    description: "保存后启动开发服务器，在浏览器打开 localhost:3000 验证本课效果。",
-    command: "pnpm dev",
-  });
-
-  return steps;
 }
 
 export type NavItem = GuideProject | LabProject;
@@ -189,26 +187,17 @@ export const NAV_ITEMS: NavItem[] = [
     ],
     files: [
       {
-        path: "lib/model.ts",
+        path: "app/api/generate-text/route.ts",
         order: 1,
         action: "create",
-        hint: "共享模型",
-        code: `import { deepSeek } from "@ai-sdk/deepseek";
-
-export const model = deepSeek("deepseek-flash");`,
-      },
-      {
-        path: "app/api/generate-text/route.ts",
-        order: 2,
-        action: "create",
-        hint: "POST 接口",
+        hint: "POST 接口 + DeepSeek",
         code: `import { generateText } from "ai";
-import { model } from "@/lib/model";
+import { deepSeek } from "@ai-sdk/deepseek";
 
 export async function POST(req: Request) {
   const { prompt } = await req.json();
   const { text } = await generateText({
-    model,
+    model: deepSeek("deepseek-flash"),
     prompt,
   });
   return Response.json({ text });
@@ -216,7 +205,7 @@ export async function POST(req: Request) {
       },
       {
         path: "app/page.tsx",
-        order: 3,
+        order: 2,
         action: "replace",
         hint: "首页表单 + 展示结果",
         code: `"use client";
@@ -230,21 +219,44 @@ export default function Home() {
 
   async function onSubmit() {
     setLoading(true);
-    const res = await fetch("/api/generate-text", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt }),
-    });
-    const data = await res.json();
-    setText(data.text);
-    setLoading(false);
+    try {
+      const res = await fetch("/api/generate-text", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt }),
+      });
+      const data = await res.json();
+      setText(data.text ?? "");
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
-    <main className="mx-auto max-w-lg space-y-4 p-6">
-      <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} />
-      <button onClick={onSubmit} disabled={loading}>发送</button>
-      {text && <p>{text}</p>}
+    <main className="mx-auto flex min-h-screen max-w-lg flex-col gap-4 bg-zinc-50 p-6">
+      <div className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
+        <h1 className="mb-4 text-base font-semibold text-zinc-900">单轮问答</h1>
+        <textarea
+          className="mb-3 min-h-28 w-full resize-y rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-sm text-zinc-900 outline-none focus:border-zinc-400 focus:ring-2 focus:ring-zinc-200"
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+        />
+        <button
+          type="button"
+          className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
+          onClick={onSubmit}
+          disabled={loading}
+        >
+          {loading ? "生成中…" : "发送"}
+        </button>
+      </div>
+
+      {text && (
+        <div className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
+          <p className="mb-2 text-xs font-medium text-zinc-500">回复</p>
+          <p className="whitespace-pre-wrap text-sm leading-7 text-zinc-800">{text}</p>
+        </div>
+      )}
     </main>
   );
 }`,
@@ -261,7 +273,7 @@ export default function Home() {
       "toTextStreamResponse — 服务端返回文本流",
       "useCompletion — 客户端边收边渲染",
     ],
-    prerequisite: "确认已完成「单轮问答」，lib/model.ts 已存在。",
+    prerequisite: "确认已完成「单轮问答」。",
     docLinks: [
       {
         title: "streamText",
@@ -283,11 +295,14 @@ export default function Home() {
         action: "create",
         hint: "流式 POST 接口",
         code: `import { streamText } from "ai";
-import { model } from "@/lib/model";
+import { deepSeek } from "@ai-sdk/deepseek";
 
 export async function POST(req: Request) {
   const { prompt } = await req.json();
-  const result = streamText({ model, prompt });
+  const result = streamText({
+    model: deepSeek("deepseek-flash"),
+    prompt,
+  });
   return result.toTextStreamResponse();
 }`,
       },
@@ -349,12 +364,12 @@ export function ChatCompletion() {
         action: "create",
         hint: "多轮 chat 接口",
         code: `import { convertToModelMessages, streamText, type UIMessage } from "ai";
-import { model } from "@/lib/model";
+import { deepSeek } from "@ai-sdk/deepseek";
 
 export async function POST(req: Request) {
   const { messages }: { messages: UIMessage[] } = await req.json();
   const result = streamText({
-    model,
+    model: deepSeek("deepseek-flash"),
     messages: await convertToModelMessages(messages),
   });
   return result.toUIMessageStreamResponse();

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CopyButton } from "@/components/copy-button";
+import { CodePanel } from "@/components/code-panel";
 import { DocLinksSidebar } from "@/components/doc-links-sidebar";
 import {
   labContent,
@@ -45,7 +45,7 @@ export function ProjectView({ project }: { project: LabProject }) {
 
           <ConceptList concepts={project.concepts} />
 
-          <FollowStepsList steps={followSteps} onSelectFile={setSelectedPath} />
+          <FollowStepsList steps={followSteps} />
 
           <div className={`mt-6 ${labFileGrid}`}>
             <FileList
@@ -84,69 +84,19 @@ function ConceptList({ concepts }: { concepts: string[] }) {
   );
 }
 
-function FollowStepsList({
-  steps,
-  onSelectFile,
-}: {
-  steps: FollowStep[];
-  onSelectFile: (path: string) => void;
-}) {
+function FollowStepsList({ steps }: { steps: FollowStep[] }) {
+  if (steps.length === 0) return null;
+
+  const step = steps[0]!;
+
   return (
     <section className="mt-6 space-y-3">
       <h2 className="text-sm font-semibold">跟做步骤</h2>
-      <ol className="space-y-4">
-        {steps.map((step, index) => (
-          <li key={`${step.description}-${index}`} className="space-y-2">
-            <p className="text-sm leading-6 text-muted">
-              <span className="mr-1.5 font-medium text-foreground">{index + 1}.</span>
-              {step.description}
-            </p>
-            {step.command && <CommandRow command={step.command} />}
-            {step.copyText && (
-              <CopyCodeRow
-                label={step.copyLabel ?? "复制代码"}
-                code={step.copyText}
-                onSelect={() => step.copyLabel && onSelectFile(step.copyLabel)}
-              />
-            )}
-          </li>
-        ))}
-      </ol>
+      <div className="space-y-2">
+        <p className="text-sm leading-6 text-muted">{step.description}</p>
+        <CodePanel code={step.command} language="bash" />
+      </div>
     </section>
-  );
-}
-
-function CommandRow({ command }: { command: string }) {
-  return (
-    <div className="flex items-center gap-2 rounded-lg border border-border bg-zinc-950 px-3 py-2">
-      <code className="min-w-0 flex-1 break-all font-mono text-xs leading-5 text-zinc-100">
-        {command}
-      </code>
-      <CopyButton text={command} />
-    </div>
-  );
-}
-
-function CopyCodeRow({
-  label,
-  code,
-  onSelect,
-}: {
-  label: string;
-  code: string;
-  onSelect?: () => void;
-}) {
-  return (
-    <div className="flex items-center gap-2 rounded-lg border border-border bg-zinc-950 px-3 py-2">
-      <button
-        type="button"
-        onClick={onSelect}
-        className="min-w-0 flex-1 truncate text-left font-mono text-xs leading-5 text-zinc-300 hover:text-zinc-100"
-      >
-        {label}
-      </button>
-      <CopyButton text={code} />
-    </div>
   );
 }
 
@@ -206,16 +156,8 @@ function CodeBlock({ file }: { file: LabProject["files"][number] | undefined }) 
 
   return (
     <section className="flex min-h-0 flex-col space-y-2">
-      <div className="flex items-center justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          <h2 className="text-sm font-semibold">代码</h2>
-          <p className="truncate font-mono text-xs text-muted">{file.path}</p>
-        </div>
-        <CopyButton text={file.code} />
-      </div>
-      <pre className="min-h-0 flex-1 overflow-auto rounded-lg border border-border bg-zinc-950 p-4 text-xs leading-5 text-zinc-100">
-        <code>{file.code}</code>
-      </pre>
+      <h2 className="text-sm font-semibold">代码</h2>
+      <CodePanel code={file.code} path={file.path} />
     </section>
   );
 }

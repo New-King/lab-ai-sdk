@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { copyToClipboard } from "@/lib/copy-to-clipboard";
 
 function IconCopy({ className }: { className?: string }) {
   return (
@@ -29,23 +30,36 @@ function IconCheck({ className }: { className?: string }) {
   );
 }
 
-export function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
+type CopyState = "idle" | "copied" | "failed";
 
-  async function onCopy() {
-    await navigator.clipboard.writeText(text);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1500);
+export function CopyButton({ text }: { text: string }) {
+  const [state, setState] = useState<CopyState>("idle");
+
+  async function onCopy(event: React.MouseEvent<HTMLButtonElement>) {
+    event.stopPropagation();
+    const ok = await copyToClipboard(text);
+    setState(ok ? "copied" : "failed");
+    window.setTimeout(() => setState("idle"), 1500);
   }
+
+  const label =
+    state === "copied" ? "已复制" : state === "failed" ? "复制失败" : "复制";
 
   return (
     <button
       type="button"
       onClick={onCopy}
-      aria-label={copied ? "已复制" : "复制"}
+      aria-label={label}
+      title={label}
       className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-zinc-400 transition-colors hover:bg-white/10 hover:text-zinc-100"
     >
-      {copied ? <IconCheck className="h-4 w-4" /> : <IconCopy className="h-4 w-4" />}
+      {state === "copied" ? (
+        <IconCheck className="h-4 w-4 text-emerald-400" />
+      ) : state === "failed" ? (
+        <span className="text-[10px] leading-none text-red-400">!</span>
+      ) : (
+        <IconCopy className="h-4 w-4" />
+      )}
     </button>
   );
 }

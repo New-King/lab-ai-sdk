@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CopyButton } from "@/components/copy-button";
+import { CodePanel } from "@/components/code-panel";
 import { DocLinksSidebar } from "@/components/doc-links-sidebar";
 import {
   labContent,
@@ -86,10 +86,7 @@ function CodeBlock({ file }: { file: GuideProject["files"][number] | undefined }
 
   return (
     <section className="flex min-h-0 flex-col space-y-2">
-      <div className="flex items-baseline justify-between gap-2">
-        <h2 className="text-sm font-semibold">代码</h2>
-        <p className="truncate font-mono text-xs text-muted">{file.path}</p>
-      </div>
+      <h2 className="text-sm font-semibold">代码</h2>
 
       {file.steps ? (
         <div className="space-y-5">
@@ -105,7 +102,7 @@ function CodeBlock({ file }: { file: GuideProject["files"][number] | undefined }
                   ))}
                 </ul>
               )}
-              <CommandRow command={step.command} />
+              <CodePanel code={step.command} language="bash" />
             </div>
           ))}
         </div>
@@ -114,20 +111,9 @@ function CodeBlock({ file }: { file: GuideProject["files"][number] | undefined }
           {file.hint && (
             <p className="text-sm leading-6 text-muted">{file.hint}</p>
           )}
-          <CommandRow command={file.code} />
+          <CodePanel code={file.code} path={file.path} />
         </>
       )}
     </section>
-  );
-}
-
-function CommandRow({ command }: { command: string }) {
-  return (
-    <div className="flex items-center gap-2 rounded-lg border border-border bg-zinc-950 px-3 py-2">
-      <code className="min-w-0 flex-1 break-all font-mono text-xs leading-5 text-zinc-100">
-        {command}
-      </code>
-      <CopyButton text={command} />
-    </div>
   );
 }
