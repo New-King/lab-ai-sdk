@@ -40,6 +40,15 @@ export const HOME = {
         "学习路径：初始化项目与环境 → 单轮问答（generateText）→ 流式回复（streamText）→ 多轮对话（useChat），由 Core 到 UI，逐步掌握 AI SDK 的核心用法。",
       ],
     },
+    {
+      title: "Core 与 UI 怎么分工",
+      bullets: [
+        "Core（ai 包）：generateText / streamText 等在服务端调用模型。",
+        "UI（@ai-sdk/react）：useCompletion / useChat / useObject 消费流式响应，管理 loading、结果与错误。",
+        "单轮问答：服务端 generateText，客户端 fetch — 非流式浏览器 UI 没有官方 Hook，自己接 HTTP 是正常做法。",
+        "流式及多轮：必须用对应 Hook，不要手写 fetch 解析流。",
+      ],
+    },
   ] satisfies HomeSection[],
   stack: {
     title: "本教程技术栈",

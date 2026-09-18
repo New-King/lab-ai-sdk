@@ -23,6 +23,10 @@ pnpm dev
 
 若 `create-next-app` 仍弹出交互选项：TypeScript / ESLint / Tailwind / App Router 选 **Yes**，`src/` 目录选 **No**。
 
+## 维护
+
+改教程示例前读 `AGENTS.md` 的 **SDK 使用守则**（Core/UI 分工、Hook 选型、禁止重复造轮子）。
+
 ## 相关
 
 - 练习项目：`../../demo/my-ai-app`

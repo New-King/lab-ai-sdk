@@ -212,7 +212,7 @@ export const NAV_ITEMS: NavItem[] = [
     concepts: [
       "generateText — Core 层非流式文本生成",
       "Route Handler — app/api/.../route.ts 暴露 POST 接口",
-      "fetch — 客户端调用自己的 API",
+      "fetch — 非流式 UI 无官方 Hook，客户端自己接 HTTP（下一课起用 @ai-sdk/react）",
     ],
     prerequisite: "确认 my-ai-app 里 .env.local 已配置 DEEPSEEK_API_KEY。",
     docLinks: [
