@@ -85,7 +85,7 @@ export function getLabOperations(files: ProjectFile[]): LabOperation[] {
       id: "scaffold",
       order: order++,
       label: "创建文件",
-      description: `在 ${PROJECT_DIR} 目录执行，创建本课需要的文件夹和空文件。`,
+      description: `在 ${PROJECT_DIR} 目录执行，创建文件夹和空文件。`,
       command,
     });
   }
@@ -261,13 +261,16 @@ export default function Home() {
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(false);
 
-  async function onSubmit() {
+  async function handleSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    if (!prompt.trim() || loading) return;
+
     setLoading(true);
     try {
       const res = await fetch("/api/generate-text", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({ prompt: prompt.trim() }),
       });
       const data = await res.json();
       setText(data.text ?? "");
@@ -277,31 +280,43 @@ export default function Home() {
   }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-lg flex-col gap-4 bg-zinc-50 p-6">
-      <div className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
-        <h1 className="mb-4 text-base font-semibold text-zinc-900">单轮问答</h1>
-        <textarea
-          className="mb-3 min-h-28 w-full resize-y rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-sm text-zinc-900 outline-none focus:border-zinc-400 focus:ring-2 focus:ring-zinc-200"
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-        />
-        <button
-          type="button"
-          className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
-          onClick={onSubmit}
-          disabled={loading}
-        >
-          {loading ? "生成中…" : "发送"}
-        </button>
-      </div>
+    <div className="flex flex-1 flex-col items-center px-4 py-12 font-sans">
+      <main className="w-full max-w-4xl space-y-8">
+        <header className="space-y-2">
+          <h1 className="text-2xl font-semibold tracking-tight">单轮问答</h1>
+          <p className="text-sm text-zinc-500">
+            输入问题，等服务端一次性返回完整回复。
+          </p>
+        </header>
 
-      {text && (
-        <div className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
-          <p className="mb-2 text-xs font-medium text-zinc-500">回复</p>
-          <p className="whitespace-pre-wrap text-sm leading-7 text-zinc-800">{text}</p>
-        </div>
-      )}
-    </main>
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <label className="block text-sm font-medium">
+            问题
+            <textarea
+              value={prompt}
+              onChange={(event) => setPrompt(event.target.value)}
+              rows={3}
+              className="mt-1 w-full resize-none rounded-lg border border-zinc-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-zinc-200"
+            />
+          </label>
+
+          <button
+            type="submit"
+            disabled={loading || !prompt.trim()}
+            className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+          >
+            {loading ? "生成中…" : "发送"}
+          </button>
+        </form>
+
+        {text && (
+          <section className="space-y-2">
+            <h2 className="text-sm font-medium text-zinc-500">回复</h2>
+            <p className="whitespace-pre-wrap text-sm leading-7">{text}</p>
+          </section>
+        )}
+      </main>
+    </div>
   );
 }`,
       },
@@ -311,11 +326,11 @@ export default function Home() {
     kind: "project",
     slug: "stream",
     title: "流式回复",
-    summary: "把等待改成「边生成边显示」，体验更接近真实聊天产品。",
+    summary: "把等待改成「边生成边显示」：服务端 streamText，客户端 useCompletion 消费流。",
     concepts: [
       "streamText — token 级流式输出",
-      "toTextStreamResponse — 服务端返回文本流",
-      "useCompletion — 客户端边收边渲染",
+      "createUIMessageStreamResponse — 服务端返回 UI 可消费的流",
+      "useCompletion — @ai-sdk/react 内置 hook，边收边渲染",
     ],
     prerequisite: "确认已完成「单轮问答」。",
     docLinks: [
@@ -328,51 +343,105 @@ export default function Home() {
         href: "https://ai-sdk.dev/docs/ai-sdk-ui/completion",
       },
       {
+        title: "Stream Protocols",
+        href: "https://ai-sdk.dev/docs/ai-sdk-ui/stream-protocol",
+      },
+      {
         title: "DeepSeek Provider",
         href: "https://ai-sdk.dev/providers/ai-sdk-providers/deepseek",
       },
     ],
     files: [
       {
-        path: "app/api/stream-text/route.ts",
+        path: "app/api/completion/route.ts",
         order: 1,
         action: "create",
-        hint: "流式 POST 接口",
-        code: `import { streamText } from "ai";
+        hint: "streamText + createUIMessageStreamResponse",
+        code: `import {
+  createUIMessageStreamResponse,
+  streamText,
+  toUIMessageStream,
+} from "ai";
 import { deepSeek } from "@ai-sdk/deepseek";
+
+export const maxDuration = 30;
 
 export async function POST(req: Request) {
   const { prompt } = await req.json();
+
   const result = streamText({
     model: deepSeek("deepseek-flash"),
     prompt,
   });
-  return result.toTextStreamResponse();
+
+  return createUIMessageStreamResponse({
+    stream: toUIMessageStream({ stream: result.stream }),
+  });
 }`,
       },
       {
-        path: "components/chat-completion.tsx",
+        path: "app/page.tsx",
         order: 2,
-        action: "create",
-        hint: "useCompletion 组件",
+        action: "replace",
+        hint: "useCompletion 消费流式回复",
         code: `"use client";
 
 import { useCompletion } from "@ai-sdk/react";
+import { useState } from "react";
 
-export function ChatCompletion() {
-  const { completion, complete, isLoading } = useCompletion({
-    api: "/api/stream-text",
+export default function Home() {
+  const [prompt, setPrompt] = useState("用三句话介绍 TypeScript");
+  const { completion, complete, isLoading, error } = useCompletion({
+    api: "/api/completion",
   });
 
+  async function handleSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    if (!prompt.trim() || isLoading) return;
+    await complete(prompt.trim());
+  }
+
   return (
-    <div>
-      <button
-        onClick={() => complete("用三句话介绍 TypeScript")}
-        disabled={isLoading}
-      >
-        发送
-      </button>
-      <p>{completion}</p>
+    <div className="flex flex-1 flex-col items-center px-4 py-12 font-sans">
+      <main className="w-full max-w-4xl space-y-8">
+        <header className="space-y-2">
+          <h1 className="text-2xl font-semibold tracking-tight">流式回复</h1>
+          <p className="text-sm text-zinc-500">
+            发送后 token 逐步返回，useCompletion 自动更新 completion。
+          </p>
+        </header>
+
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <label className="block text-sm font-medium">
+            问题
+            <textarea
+              value={prompt}
+              onChange={(event) => setPrompt(event.target.value)}
+              rows={3}
+              className="mt-1 w-full resize-none rounded-lg border border-zinc-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-zinc-200"
+            />
+          </label>
+
+          <button
+            type="submit"
+            disabled={isLoading || !prompt.trim()}
+            className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+          >
+            {isLoading ? "生成中…" : "发送"}
+          </button>
+        </form>
+
+        {error && (
+          <p className="text-sm text-red-600">出错了，请重试。</p>
+        )}
+
+        {completion && (
+          <section className="space-y-2">
+            <h2 className="text-sm font-medium text-zinc-500">回复</h2>
+            <p className="whitespace-pre-wrap text-sm leading-7">{completion}</p>
+          </section>
+        )}
+      </main>
     </div>
   );
 }`,
@@ -389,7 +458,7 @@ export function ChatCompletion() {
       "convertToModelMessages — UIMessage 转模型消息",
       "toUIMessageStreamResponse — 流式 UI 消息协议",
     ],
-    prerequisite: "确认已完成「流式回复」，components 目录已存在。",
+    prerequisite: "确认已完成「流式回复」。",
     docLinks: [
       { title: "useChat", href: "https://ai-sdk.dev/docs/ai-sdk-ui/chatbot" },
       {
