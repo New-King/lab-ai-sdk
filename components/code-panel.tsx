@@ -12,7 +12,7 @@ type CodePanelProps = {
   language?: string;
 };
 
-/** 语法高亮代码块，复制按钮在块内顶栏 */
+/** 语法高亮代码块；长行在块内横向滚动，不撑破页面布局 */
 export function CodePanel({ code, path, language }: CodePanelProps) {
   const lang = language ?? languageFromPath(path);
   const label = path ?? "terminal";
@@ -33,21 +33,23 @@ export function CodePanel({ code, path, language }: CodePanelProps) {
   }, [code, lang]);
 
   return (
-    <div className="overflow-hidden rounded-xl border border-zinc-800 bg-[#0d1117] shadow-sm">
-      <div className="flex items-center gap-2 border-b border-white/10 bg-zinc-900/90 px-3 py-2">
+    <div className="code-panel flex max-h-[min(560px,70vh)] w-full min-w-0 max-w-full flex-col overflow-hidden rounded-xl border border-zinc-800 bg-[#0d1117] shadow-sm">
+      <div className="flex shrink-0 items-center gap-2 border-b border-white/10 bg-zinc-900/95 px-3 py-2">
         <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-400">
           {label}
         </span>
-        <CopyButton text={code} />
+        <div className="shrink-0">
+          <CopyButton text={code} />
+        </div>
       </div>
-      <div className="max-h-[min(520px,65vh)] overflow-auto p-4 text-xs leading-6">
+      <div className="code-panel-body min-h-0 min-w-0 flex-1 overflow-auto p-4 text-xs leading-6">
         {html ? (
           <div
-            className="[&_pre]:!m-0 [&_pre]:!bg-transparent [&_pre]:!p-0 [&_code]:!bg-transparent"
+            className="code-panel-shiki min-w-0"
             dangerouslySetInnerHTML={{ __html: html }}
           />
         ) : (
-          <pre className="m-0 whitespace-pre-wrap break-all font-mono text-zinc-100">
+          <pre className="m-0 max-w-full overflow-x-auto whitespace-pre font-mono text-zinc-100">
             <code>{code}</code>
           </pre>
         )}

@@ -52,3 +52,22 @@ body {
 *::-webkit-scrollbar-thumb:hover {
   background-color: #a1a1aa;
 }
+
+/* Shiki 代码块：长行在面板内滚动，不撑破 grid */
+.code-panel-shiki pre {
+  margin: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  background: transparent !important;
+  padding: 0 !important;
+}
+
+.code-panel-shiki code {
+  display: block;
+  min-width: 0;
+  background: transparent !important;
+}
+
+.code-panel-shiki .line {
+  min-width: max-content;
+}

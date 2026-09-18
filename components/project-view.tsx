@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { forwardRef, useEffect, useRef, useState } from "react";
 import { CodePanel } from "@/components/code-panel";
 import { DocLinksSidebar } from "@/components/doc-links-sidebar";
 import {
@@ -11,22 +11,24 @@ import {
 } from "@/lib/layout-classes";
 import {
   getFileActionLabel,
-  getFollowSteps,
+  getLabOperations,
   getOrderLabel,
-  type FollowStep,
+  type LabOperation,
   type LabProject,
 } from "@/lib/projects";
 
-/** 项目页：跟做步骤 / 文件 / 代码 + 右侧官方文档 */
+/** 项目页：操作列表 + 代码 + 右侧官方文档 */
 export function ProjectView({ project }: { project: LabProject }) {
-  const followSteps = getFollowSteps(project.files);
-  const sortedFiles = [...project.files].sort(
-    (a, b) => (a.order ?? 99) - (b.order ?? 99),
-  );
-  const [selectedPath, setSelectedPath] = useState(sortedFiles[0]?.path ?? "");
+  const operations = getLabOperations(project.files);
+  const [selectedId, setSelectedId] = useState(operations[0]?.id ?? "");
+  const detailRef = useRef<HTMLElement>(null);
 
-  const selectedFile =
-    sortedFiles.find((file) => file.path === selectedPath) ?? sortedFiles[0];
+  const selected =
+    operations.find((op) => op.id === selectedId) ?? operations[0];
+
+  useEffect(() => {
+    detailRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [selectedId]);
 
   return (
     <main className={labMain}>
@@ -45,15 +47,13 @@ export function ProjectView({ project }: { project: LabProject }) {
 
           <ConceptList concepts={project.concepts} />
 
-          <FollowStepsList steps={followSteps} />
-
           <div className={`mt-6 ${labFileGrid}`}>
-            <FileList
-              files={sortedFiles}
-              selectedPath={selectedFile?.path ?? ""}
-              onSelect={setSelectedPath}
+            <OperationList
+              operations={operations}
+              selectedId={selected?.id ?? ""}
+              onSelect={setSelectedId}
             />
-            <CodeBlock file={selectedFile} />
+            <OperationDetail ref={detailRef} operation={selected} />
           </div>
         </section>
       </div>
@@ -84,42 +84,26 @@ function ConceptList({ concepts }: { concepts: string[] }) {
   );
 }
 
-function FollowStepsList({ steps }: { steps: FollowStep[] }) {
-  if (steps.length === 0) return null;
-
-  const step = steps[0]!;
-
-  return (
-    <section className="mt-6 space-y-3">
-      <h2 className="text-sm font-semibold">跟做步骤</h2>
-      <div className="space-y-2">
-        <p className="text-sm leading-6 text-muted">{step.description}</p>
-        <CodePanel code={step.command} language="bash" />
-      </div>
-    </section>
-  );
-}
-
-function FileList({
-  files,
-  selectedPath,
+function OperationList({
+  operations,
+  selectedId,
   onSelect,
 }: {
-  files: LabProject["files"];
-  selectedPath: string;
-  onSelect: (path: string) => void;
+  operations: LabOperation[];
+  selectedId: string;
+  onSelect: (id: string) => void;
 }) {
   return (
     <section className="space-y-2">
-      <h2 className="text-sm font-semibold">相关文件</h2>
+      <h2 className="text-sm font-semibold">操作</h2>
       <ul className="space-y-1">
-        {files.map((file) => {
-          const active = file.path === selectedPath;
+        {operations.map((op) => {
+          const active = op.id === selectedId;
           return (
-            <li key={file.path}>
+            <li key={op.id}>
               <button
                 type="button"
-                onClick={() => onSelect(file.path)}
+                onClick={() => onSelect(op.id)}
                 className={`w-full rounded-lg px-3 py-2 text-left transition-colors ${
                   active
                     ? "bg-neutral-200 text-foreground"
@@ -127,14 +111,8 @@ function FileList({
                 }`}
               >
                 <p className="truncate font-mono text-xs">
-                  {file.order != null && (
-                    <span className="mr-1 text-muted">{getOrderLabel(file.order)}</span>
-                  )}
-                  {file.path}
-                </p>
-                <p className="mt-0.5 truncate text-xs text-muted">
-                  {file.action && getFileActionLabel(file.action)}
-                  {file.hint && ` · ${file.hint}`}
+                  <span className="mr-1 text-muted">{getOrderLabel(op.order)}</span>
+                  {op.label}
                 </p>
               </button>
             </li>
@@ -145,19 +123,44 @@ function FileList({
   );
 }
 
-function CodeBlock({ file }: { file: LabProject["files"][number] | undefined }) {
-  if (!file) {
+const OperationDetail = forwardRef<
+  HTMLElement,
+  { operation: LabOperation | undefined }
+>(function OperationDetail({ operation }, ref) {
+  if (!operation) {
     return (
-      <section className="rounded-lg border border-border bg-white/60 p-4 text-sm text-muted">
-        暂无代码文件。
+      <section
+        ref={ref}
+        className="rounded-lg border border-border bg-white/60 p-4 text-sm text-muted"
+      >
+        暂无操作。
       </section>
     );
   }
 
+  if (operation.kind === "scaffold") {
+    return (
+      <section ref={ref} className="flex min-h-0 min-w-0 w-full flex-col space-y-2">
+        <h2 className="text-sm font-semibold">代码</h2>
+        <p className="text-sm leading-6 text-muted">{operation.description}</p>
+        <CodePanel code={operation.command} language="bash" />
+      </section>
+    );
+  }
+
+  const { file } = operation;
+
   return (
-    <section className="flex min-h-0 flex-col space-y-2">
+    <section ref={ref} className="flex min-h-0 min-w-0 w-full flex-col space-y-2">
       <h2 className="text-sm font-semibold">代码</h2>
-      <CodePanel code={file.code} path={file.path} />
+      {(file.action || file.hint) && (
+        <p className="text-sm leading-6 text-muted">
+          {[file.action && getFileActionLabel(file.action), file.hint]
+            .filter(Boolean)
+            .join(" · ")}
+        </p>
+      )}
+      <CodePanel key={file.path} code={file.code} path={file.path} />
     </section>
   );
-}
+});

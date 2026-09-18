@@ -85,13 +85,13 @@ function CodeBlock({ file }: { file: GuideProject["files"][number] | undefined }
   if (!file) return null;
 
   return (
-    <section className="flex min-h-0 flex-col space-y-2">
+    <section className="flex min-h-0 min-w-0 w-full flex-col space-y-2">
       <h2 className="text-sm font-semibold">代码</h2>
 
       {file.steps ? (
-        <div className="space-y-5">
+        <div className="min-w-0 space-y-5">
           {file.steps.map((step) => (
-            <div key={step.command} className="space-y-2">
+            <div key={step.command} className="min-w-0 space-y-2">
               <p className="text-sm leading-6 text-muted">{step.description}</p>
               {step.choices && step.choices.length > 0 && (
                 <ul className="space-y-1 rounded-lg border border-border bg-white px-3 py-2">

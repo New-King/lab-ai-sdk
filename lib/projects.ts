@@ -25,42 +25,82 @@ export type FollowStep = {
   command: string;
 };
 
-/** 生成 mkdir + touch 脚手架命令（仅 create 的文件） */
+export type LabOperation =
+  | {
+      kind: "scaffold";
+      id: "scaffold";
+      order: number;
+      label: string;
+      description: string;
+      command: string;
+    }
+  | {
+      kind: "file";
+      id: string;
+      order: number;
+      label: string;
+      file: ProjectFile;
+    };
+
+/** 生成 mkdir + touch 脚手架命令 */
 export function buildScaffoldCommand(files: ProjectFile[]): string | null {
   const sorted = [...files]
-    .filter((file) => file.order != null && file.action === "create")
+    .filter((file) => file.order != null && file.action != null)
     .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 
   if (sorted.length === 0) return null;
 
   const dirs = new Set<string>();
-  const newFiles: string[] = [];
+  const paths: string[] = [];
 
   for (const file of sorted) {
-    newFiles.push(file.path);
-    const slash = file.path.lastIndexOf("/");
-    if (slash > 0) dirs.add(file.path.slice(0, slash));
+    paths.push(file.path);
+    if (file.action === "create") {
+      const slash = file.path.lastIndexOf("/");
+      if (slash > 0) dirs.add(file.path.slice(0, slash));
+    }
   }
 
   const parts: string[] = [];
   if (dirs.size > 0) {
     parts.push(`mkdir -p ${[...dirs].sort().join(" ")}`);
   }
-  parts.push(`touch ${newFiles.join(" ")}`);
+  parts.push(`touch ${paths.join(" ")}`);
   return parts.join(" && ");
 }
 
-/** 跟做步骤：一条命令创建文件夹和空文件 */
-export function getFollowSteps(files: ProjectFile[]): FollowStep[] {
-  const command = buildScaffoldCommand(files);
-  if (!command) return [];
+/** 操作列表：创建文件 → 逐文件粘贴代码 */
+export function getLabOperations(files: ProjectFile[]): LabOperation[] {
+  const sorted = [...files]
+    .filter((file) => file.order != null && file.action != null)
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 
-  return [
-    {
-      description: `新增文件指令：在 ${PROJECT_DIR} 目录执行。代码在下方「相关文件」里逐个复制粘贴。`,
+  const operations: LabOperation[] = [];
+  let order = 1;
+
+  const command = buildScaffoldCommand(sorted);
+  if (command) {
+    operations.push({
+      kind: "scaffold",
+      id: "scaffold",
+      order: order++,
+      label: "创建文件",
+      description: `在 ${PROJECT_DIR} 目录执行，创建本课需要的文件夹和空文件。`,
       command,
-    },
-  ];
+    });
+  }
+
+  for (const file of sorted) {
+    operations.push({
+      kind: "file",
+      id: file.path,
+      order: order++,
+      label: getFileName(file.path),
+      file,
+    });
+  }
+
+  return operations;
 }
 
 export type GuideProject = {
@@ -91,6 +131,10 @@ export function getOrderLabel(order: number) {
 
 export function getFileActionLabel(action: FileAction) {
   return action === "replace" ? "覆盖" : "新建";
+}
+
+export function getFileName(path: string) {
+  return path.split("/").pop() ?? path;
 }
 
 export type NavItem = GuideProject | LabProject;
