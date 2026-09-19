@@ -329,7 +329,8 @@ export default function Home() {
     summary: "把等待改成「边生成边显示」：服务端 streamText，客户端 useCompletion 消费流。",
     concepts: [
       "streamText — token 级流式输出",
-      "createUIMessageStreamResponse — 服务端返回 UI 可消费的流",
+      "createUIMessageStreamResponse + toUIMessageStream — UI 消息流，useCompletion 默认协议",
+      "createTextStreamResponse + toTextStream — 纯文本流，客户端需 streamProtocol: 'text'",
       "useCompletion — @ai-sdk/react 内置 hook，边收边渲染",
     ],
     prerequisite: "确认已完成「单轮问答」。",
@@ -345,6 +346,14 @@ export default function Home() {
       {
         title: "Stream Protocols",
         href: "https://ai-sdk.dev/docs/ai-sdk-ui/stream-protocol",
+      },
+      {
+        title: "createUIMessageStreamResponse",
+        href: "https://ai-sdk.dev/docs/reference/ai-sdk-ui/create-ui-message-stream-response",
+      },
+      {
+        title: "Text Stream（createTextStreamResponse）",
+        href: "https://ai-sdk.dev/docs/ai-sdk-ui/stream-protocol#text-stream-protocol",
       },
       {
         title: "DeepSeek Provider",
