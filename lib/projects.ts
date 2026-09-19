@@ -42,23 +42,22 @@ export type LabOperation =
       file: ProjectFile;
     };
 
-/** 生成 mkdir + touch 脚手架命令 */
+/** 生成 mkdir + touch 脚手架命令（仅包含 action: create 的文件） */
 export function buildScaffoldCommand(files: ProjectFile[]): string | null {
   const sorted = [...files]
     .filter((file) => file.order != null && file.action != null)
     .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 
-  if (sorted.length === 0) return null;
+  const createFiles = sorted.filter((file) => file.action === "create");
+  if (createFiles.length === 0) return null;
 
   const dirs = new Set<string>();
   const paths: string[] = [];
 
-  for (const file of sorted) {
+  for (const file of createFiles) {
     paths.push(file.path);
-    if (file.action === "create") {
-      const slash = file.path.lastIndexOf("/");
-      if (slash > 0) dirs.add(file.path.slice(0, slash));
-    }
+    const slash = file.path.lastIndexOf("/");
+    if (slash > 0) dirs.add(file.path.slice(0, slash));
   }
 
   const parts: string[] = [];
@@ -85,7 +84,7 @@ export function getLabOperations(files: ProjectFile[]): LabOperation[] {
       id: "scaffold",
       order: order++,
       label: "创建文件",
-      description: `在 ${PROJECT_DIR} 目录执行，创建文件夹和空文件。`,
+      description: `在 ${PROJECT_DIR} 目录执行，创建本课需要新建的文件夹和空文件。`,
       command,
     });
   }
@@ -211,7 +210,7 @@ export const NAV_ITEMS: NavItem[] = [
     summary: "先跑通最小闭环：发一个问题，等服务端一次性返回完整文本。",
     concepts: [
       "generateText — Core 层非流式文本生成",
-      "Route Handler — app/api/.../route.ts 暴露 POST 接口",
+      "Route Handler — app/api/generate/route.ts，后续课在同文件上覆盖演进",
       "fetch — 非流式 UI 无官方 Hook，客户端自己接 HTTP（下一课起用 @ai-sdk/react）",
     ],
     prerequisite: "确认 my-ai-app 里 .env.local 已配置 DEEPSEEK_API_KEY。",
@@ -231,10 +230,10 @@ export const NAV_ITEMS: NavItem[] = [
     ],
     files: [
       {
-        path: "app/api/generate-text/route.ts",
+        path: "app/api/generate/route.ts",
         order: 1,
         action: "create",
-        hint: "POST 接口 + DeepSeek",
+        hint: "POST 接口 + DeepSeek（后续课覆盖此文件，不换路径）",
         code: `import { generateText } from "ai";
 import { deepSeek } from "@ai-sdk/deepseek";
 
@@ -267,7 +266,7 @@ export default function Home() {
 
     setLoading(true);
     try {
-      const res = await fetch("/api/generate-text", {
+      const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt: prompt.trim() }),
@@ -362,9 +361,9 @@ export default function Home() {
     ],
     files: [
       {
-        path: "app/api/completion/route.ts",
+        path: "app/api/generate/route.ts",
         order: 1,
-        action: "create",
+        action: "replace",
         hint: "streamText + createUIMessageStreamResponse",
         code: `import {
   createUIMessageStreamResponse,
@@ -401,7 +400,7 @@ import { useState } from "react";
 export default function Home() {
   const [prompt, setPrompt] = useState("用三句话介绍 TypeScript");
   const { completion, complete, isLoading, error } = useCompletion({
-    api: "/api/completion",
+    api: "/api/generate",
   });
 
   async function handleSubmit(event: React.FormEvent) {
@@ -461,66 +460,173 @@ export default function Home() {
     kind: "project",
     slug: "multi-turn",
     title: "多轮对话",
-    summary: "消息列表 + 上下文，搭出可用的聊天机器人页面。",
+    summary: "标准聊天界面：消息列表 + 输入框 + useChat，会话内带上文上下文。",
     concepts: [
-      "useChat — 多轮消息状态与发送",
-      "convertToModelMessages — UIMessage 转模型消息",
-      "toUIMessageStreamResponse — 流式 UI 消息协议",
+      "useChat + DefaultChatTransport — 多轮消息状态、发送与流式渲染",
+      "message.parts — 按 part 渲染 assistant 流式文本",
+      "convertToModelMessages — 把 UI messages 转成模型 messages",
+      "createUIMessageStreamResponse + toUIMessageStream — 与 useChat 配对的 UI 消息流",
     ],
     prerequisite: "确认已完成「流式回复」。",
     docLinks: [
-      { title: "useChat", href: "https://ai-sdk.dev/docs/ai-sdk-ui/chatbot" },
+      { title: "Chatbot（useChat）", href: "https://ai-sdk.dev/docs/ai-sdk-ui/chatbot" },
       {
-        title: "streamText",
-        href: "https://ai-sdk.dev/docs/ai-sdk-core/generating-text#streamtext",
+        title: "Stream Protocols",
+        href: "https://ai-sdk.dev/docs/ai-sdk-ui/stream-protocol",
+      },
+      {
+        title: "createUIMessageStreamResponse",
+        href: "https://ai-sdk.dev/docs/reference/ai-sdk-ui/create-ui-message-stream-response",
       },
       {
         title: "convertToModelMessages",
         href: "https://ai-sdk.dev/docs/reference/ai-sdk-core/convert-to-model-messages",
       },
+      {
+        title: "Message Persistence（进阶）",
+        href: "https://ai-sdk.dev/docs/ai-sdk-ui/chatbot-message-persistence",
+      },
+      {
+        title: "DeepSeek Provider",
+        href: "https://ai-sdk.dev/providers/ai-sdk-providers/deepseek",
+      },
     ],
     files: [
       {
-        path: "app/api/chat/route.ts",
+        path: "app/api/generate/route.ts",
         order: 1,
-        action: "create",
-        hint: "多轮 chat 接口",
-        code: `import { convertToModelMessages, streamText, type UIMessage } from "ai";
+        action: "replace",
+        hint: "streamText + convertToModelMessages",
+        code: `import {
+  convertToModelMessages,
+  createUIMessageStreamResponse,
+  streamText,
+  toUIMessageStream,
+  type UIMessage,
+} from "ai";
 import { deepSeek } from "@ai-sdk/deepseek";
+
+export const maxDuration = 30;
 
 export async function POST(req: Request) {
   const { messages }: { messages: UIMessage[] } = await req.json();
+
   const result = streamText({
     model: deepSeek("deepseek-flash"),
     messages: await convertToModelMessages(messages),
   });
-  return result.toUIMessageStreamResponse();
+
+  return createUIMessageStreamResponse({
+    stream: toUIMessageStream({ stream: result.stream }),
+  });
 }`,
       },
       {
-        path: "components/chat-panel.tsx",
+        path: "app/page.tsx",
         order: 2,
-        action: "create",
-        hint: "useChat 组件",
+        action: "replace",
+        hint: "聊天 UI + useChat",
         code: `"use client";
 
 import { useChat } from "@ai-sdk/react";
+import { DefaultChatTransport } from "ai";
+import { useState } from "react";
 
-export function ChatPanel() {
-  const { messages, sendMessage, status } = useChat();
+export default function Home() {
+  const { messages, sendMessage, status, stop, error } = useChat({
+    transport: new DefaultChatTransport({
+      api: "/api/generate",
+    }),
+  });
+  const [input, setInput] = useState("");
   const loading = status === "streaming" || status === "submitted";
 
   return (
-    <div>
-      {messages.map((m) => (
-        <div key={m.id}>{m.role}: {/* 渲染 parts */}</div>
-      ))}
-      <button
-        disabled={loading}
-        onClick={() => sendMessage({ text: "你好" })}
-      >
-        发送
-      </button>
+    <div className="flex flex-1 flex-col items-center px-4 py-8 font-sans">
+      <main className="flex min-h-0 w-full max-w-4xl flex-1 flex-col gap-4">
+        <header className="shrink-0 space-y-2">
+          <h1 className="text-2xl font-semibold tracking-tight">多轮对话</h1>
+          <p className="text-sm text-zinc-500">
+            连续聊天，每次请求带上完整 messages，模型能看到上文。
+          </p>
+        </header>
+
+        <div className="min-h-[240px] flex-1 overflow-y-auto rounded-lg border border-zinc-200 bg-white p-4">
+          {messages.length === 0 ? (
+            <p className="text-sm text-zinc-400">发送第一条消息开始对话</p>
+          ) : (
+            <ul className="space-y-4">
+              {messages.map((message) => (
+                <li
+                  key={message.id}
+                  className={
+                    message.role === "user" ? "flex justify-end" : "flex justify-start"
+                  }
+                >
+                  <div
+                    className={
+                      message.role === "user"
+                        ? "max-w-[85%] rounded-lg bg-zinc-900 px-3 py-2 text-sm leading-6 text-white"
+                        : "max-w-[85%] rounded-lg bg-zinc-100 px-3 py-2 text-sm leading-6 text-zinc-900"
+                    }
+                  >
+                    {message.parts.map((part, index) =>
+                      part.type === "text" ? (
+                        <span key={index} className="whitespace-pre-wrap">
+                          {part.text}
+                        </span>
+                      ) : null,
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        {error && (
+          <p className="shrink-0 text-sm text-red-600">出错了，请重试。</p>
+        )}
+
+        <form
+          className="shrink-0 space-y-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!input.trim() || loading) return;
+            sendMessage({ text: input.trim() });
+            setInput("");
+          }}
+        >
+          <label className="block text-sm font-medium">
+            消息
+            <textarea
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              rows={2}
+              placeholder="输入消息…"
+              className="mt-1 w-full resize-none rounded-lg border border-zinc-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-zinc-200"
+            />
+          </label>
+          <div className="flex gap-2">
+            <button
+              type="submit"
+              disabled={loading || !input.trim()}
+              className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+            >
+              {loading ? "回复中…" : "发送"}
+            </button>
+            {loading && (
+              <button
+                type="button"
+                onClick={() => stop()}
+                className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+              >
+                停止
+              </button>
+            )}
+          </div>
+        </form>
+      </main>
     </div>
   );
 }`,

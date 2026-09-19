@@ -155,7 +155,10 @@ const OperationDetail = forwardRef<
       <h2 className="text-sm font-semibold">代码</h2>
       {(file.action || file.hint) && (
         <p className="text-sm leading-6 text-muted">
-          {[file.action && getFileActionLabel(file.action), file.hint]
+          {[
+            file.action === "create" ? getFileActionLabel(file.action) : null,
+            file.hint,
+          ]
             .filter(Boolean)
             .join(" · ")}
         </p>
