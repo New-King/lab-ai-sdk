@@ -352,6 +352,8 @@ export default function Home() {
       "createUIMessageStreamResponse + toUIMessageStream — UI 消息流，useCompletion 默认协议",
       "createTextStreamResponse + toTextStream — 纯文本流，客户端需 streamProtocol: 'text'",
       "useCompletion — @ai-sdk/react 内置 hook，边收边渲染",
+      "complete(prompt) — 提交 prompt 并启动流式请求；await 等本次流结束",
+      "completion — 已收到的回复文本（string），流式过程中逐字变长",
     ],
     prerequisite: "确认已完成「单轮问答」。",
     docLinks: [
