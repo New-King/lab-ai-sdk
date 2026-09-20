@@ -115,8 +115,6 @@ export type LabProject = {
   slug: string;
   title: string;
   summary: string;
-  /** 跟做前的前置条件 */
-  prerequisite?: string;
   concepts: string[];
   files: ProjectFile[];
   docLinks: DocLink[];
@@ -219,7 +217,6 @@ export const NAV_ITEMS: NavItem[] = [
       "Route Handler — app/api/generate/route.ts，后续课在同文件上覆盖演进",
       "fetch — 非流式 UI 无官方 Hook，客户端自己接 HTTP（下一课起用 @ai-sdk/react）",
     ],
-    prerequisite: "确认 my-ai-app 里 .env.local 已配置 DEEPSEEK_API_KEY。",
     docLinks: [
       {
         title: "generateText",
@@ -311,6 +308,12 @@ export default function Home() {
             <textarea
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  event.currentTarget.form?.requestSubmit();
+                }
+              }}
               rows={3}
               className="mt-1 w-full resize-none rounded-lg border border-zinc-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-zinc-200"
             />
@@ -355,7 +358,6 @@ export default function Home() {
       "complete(prompt) — 提交 prompt 并启动流式请求；await 等本次流结束",
       "completion — 已收到的回复文本（string），流式过程中逐字变长",
     ],
-    prerequisite: "确认已完成「单轮问答」。",
     docLinks: [
       {
         title: "streamText",
@@ -462,6 +464,12 @@ export default function Home() {
             <textarea
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  event.currentTarget.form?.requestSubmit();
+                }
+              }}
               rows={3}
               className="mt-1 w-full resize-none rounded-lg border border-zinc-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-zinc-200"
             />
@@ -504,7 +512,6 @@ export default function Home() {
       "convertToModelMessages — 把 UI messages 转成模型 messages",
       "createUIMessageStreamResponse + toUIMessageStream — 与 useChat 配对的 UI 消息流",
     ],
-    prerequisite: "确认已完成「流式回复」。",
     docLinks: [
       { title: "Chatbot（useChat）", href: "https://ai-sdk.dev/docs/ai-sdk-ui/chatbot" },
       {
@@ -653,6 +660,12 @@ export default function Home() {
             <textarea
               value={input}
               onChange={(event) => setInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  event.currentTarget.form?.requestSubmit();
+                }
+              }}
               rows={2}
               placeholder="输入消息…"
               className="mt-1 w-full resize-none rounded-lg border border-zinc-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-zinc-200"

@@ -39,12 +39,6 @@ export function ProjectView({ project }: { project: LabProject }) {
             <p className="text-sm leading-6 text-muted">{project.summary}</p>
           </header>
 
-          {project.prerequisite && (
-            <p className="mb-6 rounded-lg border border-border bg-white px-3 py-2 text-sm leading-6 text-muted">
-              {project.prerequisite}
-            </p>
-          )}
-
           <ConceptList concepts={project.concepts} />
 
           <div className={`mt-6 ${labFileGrid}`}>
