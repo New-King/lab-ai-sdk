@@ -11,9 +11,9 @@
 ## 信息架构
 
 - **首页**（`/`）：AI SDK 基本介绍；点左上角进入，不在侧栏菜单。
-- 左侧菜单 = **4 项**：初始化 → 单轮问答 → 流式回复 → 多轮对话。
+- 左侧菜单 = **5 项**：初始化 → 单轮问答 → 流式回复 → 多轮对话 → 生成式 UI。
 - 各课页 = 跟做步骤 + 知识点 + 文件 + 代码 + 右侧教学官方文档（`docLinks`）。
-- **API 路径统一**：学员项目只用 `app/api/generate/route.ts`，第 2 课创建，第 3–4 课**覆盖**同文件；`app/page.tsx` 每课覆盖。禁止每课新建 `completion/`、`chat/` 等目录。
+- **API 路径统一**：学员项目只用 `app/api/generate/route.ts`，第 2 课创建，第 3–5 课**覆盖**同文件；`app/page.tsx` 每课覆盖。禁止每课新建 `completion/`、`chat/` 等目录。
 - 路由：`/` 首页，`/lab/[slug]` 各菜单项；数据在 `lib/projects.ts`。
 
 ## SDK 使用守则（改教程代码前必读，禁止重复造轮子）
@@ -36,7 +36,8 @@
 |---|---|---|---|
 | 单轮问答 | `generateText` → `Response.json({ text })` | 手写 `fetch` + 本地 state | **有意为之**：非流式 UI 没有 `useGenerateText`；Core 教 `generateText`，客户端自己接 HTTP |
 | 流式回复 | `streamText` → `createUIMessageStreamResponse` + `toUIMessageStream` | `useCompletion` | 禁止手写 fetch 读流、禁止 `toTextStreamResponse()`（v7 已弃用） |
-| 多轮对话 | `streamText` + `convertToModelMessages` → `createUIMessageStreamResponse` + `toUIMessageStream` | `useChat` + `DefaultChatTransport` | 禁止手写 messages 状态机、禁止 `toUIMessageStreamResponse()`（v7 已弃用） |
+| 多轮对话 | `streamText` + `convertToModelMessages` → `createUIMessageStreamResponse` + `toUIMessageStream` | `useChat` + `DefaultChatTransport` + **localStorage 持久化** | 禁止手写 messages 状态机、禁止 `toUIMessageStreamResponse()`（v7 已弃用） |
+| 生成式 UI | 同上 + `tools` + `stopWhen: isStepCount(5)` | `useChat` + 渲染 `tool-*` parts → React 组件 | 禁止 json-render；tool 定义放 `lib/tools.ts` |
 
 ### Hook 选型（勿混用）
 

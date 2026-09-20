@@ -505,15 +505,20 @@ export default function Home() {
     kind: "project",
     slug: "multi-turn",
     title: "多轮对话",
-    summary: "标准聊天界面：消息列表 + 输入框 + useChat，会话内带上文上下文。",
+    summary: "标准聊天界面：消息列表 + useChat；刷新后 messages 仍保留（localStorage）。",
     concepts: [
       "useChat + DefaultChatTransport — 多轮消息状态、发送与流式渲染",
       "message.parts — 按 part 渲染 assistant 流式文本",
       "convertToModelMessages — 把 UI messages 转成模型 messages",
       "createUIMessageStreamResponse + toUIMessageStream — 与 useChat 配对的 UI 消息流",
+      "localStorage — 把 messages 序列化存本地，刷新后 setMessages 恢复",
     ],
     docLinks: [
       { title: "Chatbot（useChat）", href: "https://ai-sdk.dev/docs/ai-sdk-ui/chatbot" },
+      {
+        title: "Chatbot Message Persistence",
+        href: "https://ai-sdk.dev/docs/ai-sdk-ui/chatbot-message-persistence",
+      },
       {
         title: "Stream Protocols",
         href: "https://ai-sdk.dev/docs/ai-sdk-ui/stream-protocol",
@@ -525,10 +530,6 @@ export default function Home() {
       {
         title: "convertToModelMessages",
         href: "https://ai-sdk.dev/docs/reference/ai-sdk-core/convert-to-model-messages",
-      },
-      {
-        title: "Message Persistence（进阶）",
-        href: "https://ai-sdk.dev/docs/ai-sdk-ui/chatbot-message-persistence",
       },
       {
         title: "DeepSeek Provider",
@@ -573,15 +574,17 @@ export async function POST(req: Request) {
         path: "app/page.tsx",
         order: 2,
         action: "replace",
-        hint: "聊天 UI + useChat",
+        hint: "聊天 UI + useChat + localStorage 持久化",
         code: `"use client";
 
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+
+const STORAGE_KEY = "my-ai-app-messages";
 
 export default function Home() {
-  const { messages, sendMessage, status, stop, error } = useChat({
+  const { messages, setMessages, sendMessage, status, stop, error } = useChat({
     transport: new DefaultChatTransport({
       api: "/api/generate",
       fetch: async (input, init) => {
@@ -599,13 +602,27 @@ export default function Home() {
   const [input, setInput] = useState("");
   const loading = status === "streaming" || status === "submitted";
 
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) setMessages(JSON.parse(raw));
+    } catch {
+      // ignore invalid stored data
+    }
+  }, [setMessages]);
+
+  useEffect(() => {
+    if (messages.length === 0) return;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
+  }, [messages]);
+
   return (
     <div className="flex flex-1 flex-col items-center px-4 py-8 font-sans">
       <main className="flex min-h-0 w-full max-w-4xl flex-1 flex-col gap-4">
         <header className="shrink-0 space-y-2">
           <h1 className="text-2xl font-semibold tracking-tight">多轮对话</h1>
           <p className="text-sm text-zinc-500">
-            连续聊天，每次请求带上完整 messages，模型能看到上文。
+            连续聊天，刷新页面后仍保留记录（localStorage）。
           </p>
         </header>
 
@@ -668,6 +685,296 @@ export default function Home() {
               }}
               rows={2}
               placeholder="输入消息…"
+              className="mt-1 w-full resize-none rounded-lg border border-zinc-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-zinc-200"
+            />
+          </label>
+          <div className="flex gap-2">
+            <button
+              type="submit"
+              disabled={loading || !input.trim()}
+              className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+            >
+              {loading ? "回复中…" : "发送"}
+            </button>
+            {loading && (
+              <button
+                type="button"
+                onClick={() => stop()}
+                className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+              >
+                停止
+              </button>
+            )}
+          </div>
+        </form>
+      </main>
+    </div>
+  );
+}`,
+      },
+    ],
+  },
+  {
+    kind: "project",
+    slug: "generative-ui",
+    title: "生成式 UI",
+    summary:
+      "综合实战：tool 调用 + message.parts 渲染 React 组件（天气卡片），延续多轮聊天与 localStorage。",
+    concepts: [
+      "tool() + inputSchema — 定义模型可调用的工具（zod 约束参数）",
+      "streamText({ tools, stopWhen }) — 服务端执行 tool 并把结果流回客户端",
+      "tool-${name} parts — useChat 消息里按 state 渲染 loading / 组件 / 错误",
+      "Generative UI — tool 结果交给 React 组件，而不只是文本",
+    ],
+    docLinks: [
+      {
+        title: "Generative User Interfaces",
+        href: "https://ai-sdk.dev/docs/ai-sdk-ui/generative-user-interfaces",
+      },
+      {
+        title: "Chatbot Tool Usage",
+        href: "https://ai-sdk.dev/docs/ai-sdk-ui/chatbot-tool-usage",
+      },
+      { title: "Tool Calling（Core）", href: "https://ai-sdk.dev/docs/ai-sdk-core/tools-and-tool-calling" },
+      {
+        title: "Chatbot Message Persistence",
+        href: "https://ai-sdk.dev/docs/ai-sdk-ui/chatbot-message-persistence",
+      },
+      {
+        title: "DeepSeek Provider",
+        href: "https://ai-sdk.dev/providers/ai-sdk-providers/deepseek",
+      },
+    ],
+    files: [
+      {
+        path: "lib/tools.ts",
+        order: 1,
+        action: "create",
+        hint: "weather tool + tools 导出",
+        code: `import { tool } from "ai";
+import { z } from "zod";
+
+export const weatherTool = tool({
+  description: "Display the weather for a location",
+  inputSchema: z.object({
+    location: z.string().describe("The location to get the weather for"),
+  }),
+  execute: async ({ location }) => {
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    return { weather: "Sunny", temperature: 22, location };
+  },
+});
+
+export const tools = {
+  displayWeather: weatherTool,
+};`,
+      },
+      {
+        path: "components/weather.tsx",
+        order: 2,
+        action: "create",
+        hint: "tool 结果对应的 UI 组件",
+        code: `type WeatherProps = {
+  temperature: number;
+  weather: string;
+  location: string;
+};
+
+export function Weather({ temperature, weather, location }: WeatherProps) {
+  return (
+    <div className="rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm">
+      <p className="font-medium">{location}</p>
+      <p className="text-zinc-600">
+        {weather} · {temperature}°C
+      </p>
+    </div>
+  );
+}`,
+      },
+      {
+        path: "app/api/generate/route.ts",
+        order: 3,
+        action: "replace",
+        hint: "streamText + tools + isStepCount",
+        code: `import {
+  convertToModelMessages,
+  createUIMessageStreamResponse,
+  isStepCount,
+  streamText,
+  toUIMessageStream,
+  type UIMessage,
+} from "ai";
+import { deepSeek } from "@ai-sdk/deepseek";
+import { tools } from "@/lib/tools";
+
+export const maxDuration = 30;
+
+export async function POST(req: Request) {
+  if (!process.env.DEEPSEEK_API_KEY) {
+    return Response.json({ error: "请先完成初始化" }, { status: 503 });
+  }
+
+  const { messages }: { messages: UIMessage[] } = await req.json();
+
+  const result = streamText({
+    model: deepSeek("deepseek-flash"),
+    system:
+      "You are a friendly assistant. When the user asks about weather, call displayWeather.",
+    messages: await convertToModelMessages(messages),
+    tools,
+    stopWhen: isStepCount(5),
+  });
+
+  return createUIMessageStreamResponse({
+    stream: toUIMessageStream({ stream: result.stream }),
+  });
+}`,
+      },
+      {
+        path: "app/page.tsx",
+        order: 4,
+        action: "replace",
+        hint: "渲染 tool-displayWeather + 持久化",
+        code: `"use client";
+
+import { Weather } from "@/components/weather";
+import { useChat } from "@ai-sdk/react";
+import { DefaultChatTransport } from "ai";
+import { useEffect, useState } from "react";
+
+const STORAGE_KEY = "my-ai-app-messages";
+
+export default function Home() {
+  const { messages, setMessages, sendMessage, status, stop, error } = useChat({
+    transport: new DefaultChatTransport({
+      api: "/api/generate",
+      fetch: async (input, init) => {
+        const res = await fetch(input, init);
+        if (res.status === 503) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(
+            typeof data.error === "string" ? data.error : "请先完成初始化",
+          );
+        }
+        return res;
+      },
+    }),
+  });
+  const [input, setInput] = useState("");
+  const loading = status === "streaming" || status === "submitted";
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) setMessages(JSON.parse(raw));
+    } catch {
+      // ignore invalid stored data
+    }
+  }, [setMessages]);
+
+  useEffect(() => {
+    if (messages.length === 0) return;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
+  }, [messages]);
+
+  return (
+    <div className="flex flex-1 flex-col items-center px-4 py-8 font-sans">
+      <main className="flex min-h-0 w-full max-w-4xl flex-1 flex-col gap-4">
+        <header className="shrink-0 space-y-2">
+          <h1 className="text-2xl font-semibold tracking-tight">生成式 UI</h1>
+          <p className="text-sm text-zinc-500">
+            问「旧金山天气怎么样」— 模型调 tool，回复里出现天气卡片而不只是文字。
+          </p>
+        </header>
+
+        <div className="min-h-[240px] flex-1 overflow-y-auto rounded-lg border border-zinc-200 bg-white p-4">
+          {messages.length === 0 ? (
+            <p className="text-sm text-zinc-400">发送第一条消息开始对话</p>
+          ) : (
+            <ul className="space-y-4">
+              {messages.map((message) => (
+                <li
+                  key={message.id}
+                  className={
+                    message.role === "user" ? "flex justify-end" : "flex justify-start"
+                  }
+                >
+                  <div
+                    className={
+                      message.role === "user"
+                        ? "max-w-[85%] rounded-lg bg-zinc-900 px-3 py-2 text-sm leading-6 text-white"
+                        : "max-w-[85%] space-y-2 rounded-lg bg-zinc-100 px-3 py-2 text-sm leading-6 text-zinc-900"
+                    }
+                  >
+                    {message.parts.map((part, index) => {
+                      if (part.type === "text") {
+                        return (
+                          <span key={index} className="whitespace-pre-wrap">
+                            {part.text}
+                          </span>
+                        );
+                      }
+
+                      if (part.type === "tool-displayWeather") {
+                        switch (part.state) {
+                          case "input-available":
+                            return (
+                              <p key={index} className="text-sm text-zinc-500">
+                                正在查询天气…
+                              </p>
+                            );
+                          case "output-available":
+                            return (
+                              <div key={index}>
+                                <Weather {...part.output} />
+                              </div>
+                            );
+                          case "output-error":
+                            return (
+                              <p key={index} className="text-sm text-red-600">
+                                {part.errorText}
+                              </p>
+                            );
+                          default:
+                            return null;
+                        }
+                      }
+
+                      return null;
+                    })}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        {error && (
+          <p className="shrink-0 text-sm text-red-600">{error.message}</p>
+        )}
+
+        <form
+          className="shrink-0 space-y-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!input.trim() || loading) return;
+            sendMessage({ text: input.trim() });
+            setInput("");
+          }}
+        >
+          <label className="block text-sm font-medium">
+            消息
+            <textarea
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  event.currentTarget.form?.requestSubmit();
+                }
+              }}
+              rows={2}
+              placeholder="例如：旧金山天气怎么样？"
               className="mt-1 w-full resize-none rounded-lg border border-zinc-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-zinc-200"
             />
           </label>
