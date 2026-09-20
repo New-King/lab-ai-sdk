@@ -9,7 +9,7 @@ import {
   labMain,
   labScroll,
 } from "@/lib/layout-classes";
-import type { GuideProject } from "@/lib/projects";
+import { getOrderLabel, type GuideProject } from "@/lib/projects";
 
 /** 初始化：命令清单，左中右布局 */
 export function GuideProjectView({ project }: { project: GuideProject }) {
@@ -56,9 +56,9 @@ function FileList({
 }) {
   return (
     <section className="space-y-2">
-      <h2 className="text-sm font-semibold">相关文件</h2>
+      <h2 className="text-sm font-semibold">操作</h2>
       <ul className="space-y-1">
-        {files.map((file) => {
+        {files.map((file, index) => {
           const active = file.path === selectedPath;
           return (
             <li key={file.path}>
@@ -71,7 +71,10 @@ function FileList({
                     : "text-foreground hover:bg-white/80"
                 }`}
               >
-                <p className="truncate font-mono text-xs">{file.path}</p>
+                <p className="truncate font-mono text-xs">
+                  <span className="mr-1 text-muted">{getOrderLabel(index + 1)}</span>
+                  {file.path}
+                </p>
               </button>
             </li>
           );
@@ -88,7 +91,7 @@ function CodeBlock({ file }: { file: GuideProject["files"][number] | undefined }
     <section className="flex min-h-0 min-w-0 w-full flex-col space-y-2">
       <h2 className="text-sm font-semibold">代码</h2>
 
-      {file.steps ? (
+      {file.steps && file.steps.length > 0 && (
         <div className="min-w-0 space-y-5">
           {file.steps.map((step) => (
             <div key={step.command} className="min-w-0 space-y-2">
@@ -106,13 +109,19 @@ function CodeBlock({ file }: { file: GuideProject["files"][number] | undefined }
             </div>
           ))}
         </div>
-      ) : (
-        <>
+      )}
+
+      {file.code && (
+        <div className="min-w-0 space-y-2">
           {file.hint && (
             <p className="text-sm leading-6 text-muted">{file.hint}</p>
           )}
-          <CodePanel code={file.code} path={file.path} />
-        </>
+          <CodePanel
+            code={file.code}
+            path={file.steps ? file.path : undefined}
+            language={file.steps ? undefined : "bash"}
+          />
+        </div>
       )}
     </section>
   );

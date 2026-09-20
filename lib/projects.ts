@@ -198,7 +198,13 @@ export const NAV_ITEMS: NavItem[] = [
       },
       {
         path: ".env.local",
-        hint: "新建 .env.local，填入 DEEPSEEK_API_KEY",
+        hint: "打开 .env.local，填入 DEEPSEEK_API_KEY：",
+        steps: [
+          {
+            description: `先进入 ${PROJECT_DIR} 项目目录，再创建 .env.local。`,
+            command: "touch .env.local",
+          },
+        ],
         code: `DEEPSEEK_API_KEY=sk-...`,
       },
     ],
@@ -238,6 +244,10 @@ export const NAV_ITEMS: NavItem[] = [
 import { deepSeek } from "@ai-sdk/deepseek";
 
 export async function POST(req: Request) {
+  if (!process.env.DEEPSEEK_API_KEY) {
+    return Response.json({ error: "请先完成初始化" }, { status: 503 });
+  }
+
   const { prompt } = await req.json();
   const { text } = await generateText({
     model: deepSeek("deepseek-flash"),
@@ -259,12 +269,14 @@ export default function Home() {
   const [prompt, setPrompt] = useState("用一句话介绍你自己");
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     if (!prompt.trim() || loading) return;
 
     setLoading(true);
+    setError("");
     try {
       const res = await fetch("/api/generate", {
         method: "POST",
@@ -272,6 +284,11 @@ export default function Home() {
         body: JSON.stringify({ prompt: prompt.trim() }),
       });
       const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "出错了，请重试");
+        setText("");
+        return;
+      }
       setText(data.text ?? "");
     } finally {
       setLoading(false);
@@ -307,6 +324,10 @@ export default function Home() {
             {loading ? "生成中…" : "发送"}
           </button>
         </form>
+
+        {error && (
+          <p className="text-sm text-red-600">{error}</p>
+        )}
 
         {text && (
           <section className="space-y-2">
@@ -375,6 +396,10 @@ import { deepSeek } from "@ai-sdk/deepseek";
 export const maxDuration = 30;
 
 export async function POST(req: Request) {
+  if (!process.env.DEEPSEEK_API_KEY) {
+    return Response.json({ error: "请先完成初始化" }, { status: 503 });
+  }
+
   const { prompt } = await req.json();
 
   const result = streamText({
@@ -401,6 +426,16 @@ export default function Home() {
   const [prompt, setPrompt] = useState("用三句话介绍 TypeScript");
   const { completion, complete, isLoading, error } = useCompletion({
     api: "/api/generate",
+    fetch: async (input, init) => {
+      const res = await fetch(input, init);
+      if (res.status === 503) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(
+          typeof data.error === "string" ? data.error : "请先完成初始化",
+        );
+      }
+      return res;
+    },
   });
 
   async function handleSubmit(event: React.FormEvent) {
@@ -440,7 +475,7 @@ export default function Home() {
         </form>
 
         {error && (
-          <p className="text-sm text-red-600">出错了，请重试。</p>
+          <p className="text-sm text-red-600">{error.message}</p>
         )}
 
         {completion && (
@@ -509,6 +544,10 @@ import { deepSeek } from "@ai-sdk/deepseek";
 export const maxDuration = 30;
 
 export async function POST(req: Request) {
+  if (!process.env.DEEPSEEK_API_KEY) {
+    return Response.json({ error: "请先完成初始化" }, { status: 503 });
+  }
+
   const { messages }: { messages: UIMessage[] } = await req.json();
 
   const result = streamText({
@@ -536,6 +575,16 @@ export default function Home() {
   const { messages, sendMessage, status, stop, error } = useChat({
     transport: new DefaultChatTransport({
       api: "/api/generate",
+      fetch: async (input, init) => {
+        const res = await fetch(input, init);
+        if (res.status === 503) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(
+            typeof data.error === "string" ? data.error : "请先完成初始化",
+          );
+        }
+        return res;
+      },
     }),
   });
   const [input, setInput] = useState("");
@@ -585,7 +634,7 @@ export default function Home() {
         </div>
 
         {error && (
-          <p className="shrink-0 text-sm text-red-600">出错了，请重试。</p>
+          <p className="shrink-0 text-sm text-red-600">{error.message}</p>
         )}
 
         <form
