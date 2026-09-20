@@ -37,7 +37,7 @@ export const HOME = {
       title: "本 Lab 讲什么",
       paragraphs: [
         "本 Lab 采用项目驱动式学习：在独立的 Next.js 项目 my-ai-app 中，按左侧课程循序渐进搭建完整应用，Lab 提供步骤、代码与文档对照。",
-        "学习路径：初始化项目与环境 → 单轮问答（generateText）→ 流式回复（streamText）→ 多轮对话（useChat + 持久化）→ 生成式 UI（tools + 组件渲染），由 Core 到 UI 逐步掌握 AI SDK。",
+        "学习路径：初始化 → 单轮问答 → 流式回复 → 多轮对话（服务端持久化）→ 生成式 UI（tools + 组件），由 Core 到 UI 逐步掌握 AI SDK。",
       ],
     },
     {

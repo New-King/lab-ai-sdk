@@ -36,7 +36,7 @@
 |---|---|---|---|
 | 单轮问答 | `generateText` → `Response.json({ text })` | 手写 `fetch` + 本地 state | **有意为之**：非流式 UI 没有 `useGenerateText`；Core 教 `generateText`，客户端自己接 HTTP |
 | 流式回复 | `streamText` → `createUIMessageStreamResponse` + `toUIMessageStream` | `useCompletion` | 禁止手写 fetch 读流、禁止 `toTextStreamResponse()`（v7 已弃用） |
-| 多轮对话 | `streamText` + `convertToModelMessages` → `createUIMessageStreamResponse` + `toUIMessageStream` | `useChat` + `DefaultChatTransport` + **localStorage 持久化** | 禁止手写 messages 状态机、禁止 `toUIMessageStreamResponse()`（v7 已弃用） |
+| 多轮对话 | `streamText` + `onEnd` → `saveChat`；GET 加载历史 | `useChat` + `id` / `chatId` + 挂载时 fetch 恢复 | 禁止 localStorage 存 messages；禁止 `toUIMessageStreamResponse()`（v7 已弃用） |
 | 生成式 UI | 同上 + `tools` + `stopWhen: isStepCount(5)` | `useChat` + 渲染 `tool-*` parts → React 组件 | 禁止 json-render；tool 定义放 `lib/tools.ts` |
 
 ### Hook 选型（勿混用）

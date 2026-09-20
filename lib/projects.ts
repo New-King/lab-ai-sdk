@@ -505,13 +505,13 @@ export default function Home() {
     kind: "project",
     slug: "multi-turn",
     title: "多轮对话",
-    summary: "标准聊天界面：消息列表 + useChat；刷新后 messages 仍保留（localStorage）。",
+    summary: "标准聊天界面 + useChat；消息存服务端（.chats/），刷新后从 API 加载。",
     concepts: [
       "useChat + DefaultChatTransport — 多轮消息状态、发送与流式渲染",
       "message.parts — 按 part 渲染 assistant 流式文本",
-      "convertToModelMessages — 把 UI messages 转成模型 messages",
-      "createUIMessageStreamResponse + toUIMessageStream — 与 useChat 配对的 UI 消息流",
-      "localStorage — 把 messages 序列化存本地，刷新后 setMessages 恢复",
+      "loadChat / saveChat — 服务端持久化（官方用文件，生产可换数据库）",
+      "toUIMessageStream onEnd — 流结束后把完整 UIMessage[] 写回存储",
+      "useChat id + body chatId — 标识会话，POST 时随 messages 一起发送",
     ],
     docLinks: [
       { title: "Chatbot（useChat）", href: "https://ai-sdk.dev/docs/ai-sdk-ui/chatbot" },
@@ -538,11 +538,53 @@ export default function Home() {
     ],
     files: [
       {
-        path: "app/api/generate/route.ts",
+        path: "lib/chat-store.ts",
         order: 1,
+        action: "create",
+        hint: "文件版 chat store（官方 persistence 示例同款思路）",
+        code: `import { type UIMessage } from "ai";
+import { existsSync, mkdirSync } from "fs";
+import { readFile, writeFile } from "fs/promises";
+import path from "path";
+
+const chatIdRegex = /^[A-Za-z0-9_-]+$/;
+
+function getChatFile(id: string): string {
+  if (!chatIdRegex.test(id)) {
+    throw new Error("Invalid chat ID");
+  }
+  const chatDir = path.resolve(process.cwd(), ".chats");
+  const chatFile = path.resolve(chatDir, \`\${id}.json\`);
+  if (!chatFile.startsWith(\`\${chatDir}\${path.sep}\`)) {
+    throw new Error("Invalid chat ID");
+  }
+  if (!existsSync(chatDir)) mkdirSync(chatDir, { recursive: true });
+  return chatFile;
+}
+
+export async function loadChat(id: string): Promise<UIMessage[]> {
+  const file = getChatFile(id);
+  if (!existsSync(file)) return [];
+  return JSON.parse(await readFile(file, "utf8"));
+}
+
+export async function saveChat({
+  chatId,
+  messages,
+}: {
+  chatId: string;
+  messages: UIMessage[];
+}): Promise<void> {
+  await writeFile(getChatFile(chatId), JSON.stringify(messages, null, 2));
+}`,
+      },
+      {
+        path: "app/api/generate/route.ts",
+        order: 2,
         action: "replace",
-        hint: "streamText + convertToModelMessages",
-        code: `import {
+        hint: "GET 加载 + POST stream + onEnd saveChat",
+        code: `import { loadChat, saveChat } from "@/lib/chat-store";
+import {
   convertToModelMessages,
   createUIMessageStreamResponse,
   streamText,
@@ -553,12 +595,25 @@ import { deepSeek } from "@ai-sdk/deepseek";
 
 export const maxDuration = 30;
 
+export async function GET(req: Request) {
+  const chatId = new URL(req.url).searchParams.get("chatId") ?? "default";
+  try {
+    const messages = await loadChat(chatId);
+    return Response.json({ messages });
+  } catch {
+    return Response.json({ messages: [] });
+  }
+}
+
 export async function POST(req: Request) {
   if (!process.env.DEEPSEEK_API_KEY) {
     return Response.json({ error: "请先完成初始化" }, { status: 503 });
   }
 
-  const { messages }: { messages: UIMessage[] } = await req.json();
+  const {
+    messages,
+    chatId = "default",
+  }: { messages: UIMessage[]; chatId?: string } = await req.json();
 
   const result = streamText({
     model: deepSeek("deepseek-flash"),
@@ -566,27 +621,35 @@ export async function POST(req: Request) {
   });
 
   return createUIMessageStreamResponse({
-    stream: toUIMessageStream({ stream: result.stream }),
+    stream: toUIMessageStream({
+      stream: result.stream,
+      originalMessages: messages,
+      onEnd: ({ messages: finalMessages }) => {
+        void saveChat({ chatId, messages: finalMessages });
+      },
+    }),
   });
 }`,
       },
       {
         path: "app/page.tsx",
-        order: 2,
+        order: 3,
         action: "replace",
-        hint: "聊天 UI + useChat + localStorage 持久化",
+        hint: "useChat + chatId + 挂载时 GET 恢复",
         code: `"use client";
 
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { useEffect, useState } from "react";
 
-const STORAGE_KEY = "my-ai-app-messages";
+const CHAT_ID = "default";
 
 export default function Home() {
   const { messages, setMessages, sendMessage, status, stop, error } = useChat({
+    id: CHAT_ID,
     transport: new DefaultChatTransport({
       api: "/api/generate",
+      body: { chatId: CHAT_ID },
       fetch: async (input, init) => {
         const res = await fetch(input, init);
         if (res.status === 503) {
@@ -603,18 +666,15 @@ export default function Home() {
   const loading = status === "streaming" || status === "submitted";
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) setMessages(JSON.parse(raw));
-    } catch {
-      // ignore invalid stored data
-    }
+    fetch(\`/api/generate?chatId=\${CHAT_ID}\`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (Array.isArray(data.messages) && data.messages.length > 0) {
+          setMessages(data.messages);
+        }
+      })
+      .catch(() => {});
   }, [setMessages]);
-
-  useEffect(() => {
-    if (messages.length === 0) return;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
-  }, [messages]);
 
   return (
     <div className="flex flex-1 flex-col items-center px-4 py-8 font-sans">
@@ -622,7 +682,7 @@ export default function Home() {
         <header className="shrink-0 space-y-2">
           <h1 className="text-2xl font-semibold tracking-tight">多轮对话</h1>
           <p className="text-sm text-zinc-500">
-            连续聊天，刷新页面后仍保留记录（localStorage）。
+            连续聊天；消息保存在服务端 .chats/，刷新后自动恢复。
           </p>
         </header>
 
@@ -795,8 +855,9 @@ export function Weather({ temperature, weather, location }: WeatherProps) {
         path: "app/api/generate/route.ts",
         order: 3,
         action: "replace",
-        hint: "streamText + tools + isStepCount",
-        code: `import {
+        hint: "tools + onEnd saveChat（保留 GET）",
+        code: `import { loadChat, saveChat } from "@/lib/chat-store";
+import {
   convertToModelMessages,
   createUIMessageStreamResponse,
   isStepCount,
@@ -809,12 +870,25 @@ import { tools } from "@/lib/tools";
 
 export const maxDuration = 30;
 
+export async function GET(req: Request) {
+  const chatId = new URL(req.url).searchParams.get("chatId") ?? "default";
+  try {
+    const messages = await loadChat(chatId);
+    return Response.json({ messages });
+  } catch {
+    return Response.json({ messages: [] });
+  }
+}
+
 export async function POST(req: Request) {
   if (!process.env.DEEPSEEK_API_KEY) {
     return Response.json({ error: "请先完成初始化" }, { status: 503 });
   }
 
-  const { messages }: { messages: UIMessage[] } = await req.json();
+  const {
+    messages,
+    chatId = "default",
+  }: { messages: UIMessage[]; chatId?: string } = await req.json();
 
   const result = streamText({
     model: deepSeek("deepseek-flash"),
@@ -826,7 +900,13 @@ export async function POST(req: Request) {
   });
 
   return createUIMessageStreamResponse({
-    stream: toUIMessageStream({ stream: result.stream }),
+    stream: toUIMessageStream({
+      stream: result.stream,
+      originalMessages: messages,
+      onEnd: ({ messages: finalMessages }) => {
+        void saveChat({ chatId, messages: finalMessages });
+      },
+    }),
   });
 }`,
       },
@@ -834,7 +914,7 @@ export async function POST(req: Request) {
         path: "app/page.tsx",
         order: 4,
         action: "replace",
-        hint: "渲染 tool-displayWeather + 持久化",
+        hint: "渲染 tool-displayWeather + 服务端持久化",
         code: `"use client";
 
 import { Weather } from "@/components/weather";
@@ -842,12 +922,14 @@ import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { useEffect, useState } from "react";
 
-const STORAGE_KEY = "my-ai-app-messages";
+const CHAT_ID = "default";
 
 export default function Home() {
   const { messages, setMessages, sendMessage, status, stop, error } = useChat({
+    id: CHAT_ID,
     transport: new DefaultChatTransport({
       api: "/api/generate",
+      body: { chatId: CHAT_ID },
       fetch: async (input, init) => {
         const res = await fetch(input, init);
         if (res.status === 503) {
@@ -864,18 +946,15 @@ export default function Home() {
   const loading = status === "streaming" || status === "submitted";
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) setMessages(JSON.parse(raw));
-    } catch {
-      // ignore invalid stored data
-    }
+    fetch(\`/api/generate?chatId=\${CHAT_ID}\`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (Array.isArray(data.messages) && data.messages.length > 0) {
+          setMessages(data.messages);
+        }
+      })
+      .catch(() => {});
   }, [setMessages]);
-
-  useEffect(() => {
-    if (messages.length === 0) return;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
-  }, [messages]);
 
   return (
     <div className="flex flex-1 flex-col items-center px-4 py-8 font-sans">
