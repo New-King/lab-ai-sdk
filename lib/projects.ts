@@ -309,6 +309,7 @@ export default function Home() {
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
               onKeyDown={(event) => {
+                if (event.nativeEvent.isComposing) return;
                 if (event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault();
                   event.currentTarget.form?.requestSubmit();
@@ -465,6 +466,7 @@ export default function Home() {
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
               onKeyDown={(event) => {
+                if (event.nativeEvent.isComposing) return;
                 if (event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault();
                   event.currentTarget.form?.requestSubmit();
@@ -738,6 +740,7 @@ export default function Home() {
               value={input}
               onChange={(event) => setInput(event.target.value)}
               onKeyDown={(event) => {
+                if (event.nativeEvent.isComposing) return;
                 if (event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault();
                   event.currentTarget.form?.requestSubmit();
@@ -779,7 +782,7 @@ export default function Home() {
     slug: "generative-ui",
     title: "生成式 UI",
     summary:
-      "综合实战：tool 调用 + message.parts 渲染 React 组件（天气卡片），延续多轮聊天与 localStorage。",
+      "综合实战：tool 调用 + message.parts 渲染 React 组件（天气卡片），延续服务端持久化。",
     concepts: [
       "tool() + inputSchema — 定义模型可调用的工具（zod 约束参数）",
       "streamText({ tools, stopWhen }) — 服务端执行 tool 并把结果流回客户端",
@@ -1047,6 +1050,7 @@ export default function Home() {
               value={input}
               onChange={(event) => setInput(event.target.value)}
               onKeyDown={(event) => {
+                if (event.nativeEvent.isComposing) return;
                 if (event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault();
                   event.currentTarget.form?.requestSubmit();
