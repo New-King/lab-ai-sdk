@@ -11,7 +11,7 @@ export type FileAction = "create" | "replace";
 
 export type ProjectFile = {
   path: string;
-  code: string;
+  code?: string;
   hint?: string;
   steps?: CommandStep[];
   /** 项目课：跟做顺序 */
@@ -166,8 +166,6 @@ export const INIT_STEPS: CommandStep[] = [
   },
 ];
 
-export const INIT_COMMANDS = INIT_STEPS.map((step) => step.command).join("\n");
-
 export const NAV_ITEMS: NavItem[] = [
   {
     kind: "guide",
@@ -183,15 +181,10 @@ export const NAV_ITEMS: NavItem[] = [
         title: "DeepSeek Provider",
         href: "https://ai-sdk.dev/providers/ai-sdk-providers/deepseek",
       },
-      {
-        title: "Providers 与模型",
-        href: "https://ai-sdk.dev/docs/foundations/providers-and-models",
-      },
     ],
     files: [
       {
         path: "终端",
-        code: INIT_COMMANDS,
         steps: INIT_STEPS,
       },
       {
@@ -213,9 +206,8 @@ export const NAV_ITEMS: NavItem[] = [
     title: "单轮问答",
     summary: "先跑通最小闭环：发一个问题，等服务端一次性返回完整文本。",
     concepts: [
-      "generateText — Core 层非流式文本生成",
-      "Route Handler — app/api/generate/route.ts，后续课在同文件上覆盖演进",
-      "fetch — 非流式 UI 无官方 Hook，客户端自己接 HTTP（下一课起用 @ai-sdk/react）",
+      "generateText — 非流式生成文本，等模型出完整结果后再使用",
+      "deepSeek — DeepSeek 的模型提供方，用 deepSeek('deepseek-flash') 指定模型",
     ],
     docLinks: [
       {
@@ -223,8 +215,12 @@ export const NAV_ITEMS: NavItem[] = [
         href: "https://ai-sdk.dev/docs/ai-sdk-core/generating-text",
       },
       {
-        title: "Next.js Route Handlers",
-        href: "https://nextjs.org/docs/app/building-your-application/routing/route-handlers",
+        title: "generateText 参考",
+        href: "https://ai-sdk.dev/docs/reference/ai-sdk-core/generate-text",
+      },
+      {
+        title: "Providers 与模型",
+        href: "https://ai-sdk.dev/docs/foundations/providers-and-models",
       },
       {
         title: "DeepSeek Provider",
@@ -352,12 +348,10 @@ export default function Home() {
     title: "流式回复",
     summary: "把等待改成「边生成边显示」：服务端 streamText，客户端 useCompletion 消费流。",
     concepts: [
-      "streamText — token 级流式输出",
-      "createUIMessageStreamResponse + toUIMessageStream — UI 消息流，useCompletion 默认协议",
-      "createTextStreamResponse + toTextStream — 纯文本流，客户端需 streamProtocol: 'text'",
-      "useCompletion — @ai-sdk/react 内置 hook，边收边渲染",
-      "complete(prompt) — 提交 prompt 并启动流式请求；await 等本次流结束",
-      "completion — 已收到的回复文本（string），流式过程中逐字变长",
+      "streamText — 流式生成文本，返回结果对象，result.stream 是逐块事件流",
+      "toUIMessageStream — 把生成结果转成 UI 消息流，供前端 Hook 消费",
+      "createUIMessageStreamResponse — 把 UI 消息流包成 HTTP 响应返回浏览器",
+      "useCompletion — 文本补全 Hook：发请求、边收边渲染回复、管理加载与错误",
     ],
     docLinks: [
       {
@@ -371,14 +365,6 @@ export default function Home() {
       {
         title: "Stream Protocols",
         href: "https://ai-sdk.dev/docs/ai-sdk-ui/stream-protocol",
-      },
-      {
-        title: "createUIMessageStreamResponse",
-        href: "https://ai-sdk.dev/docs/reference/ai-sdk-ui/create-ui-message-stream-response",
-      },
-      {
-        title: "Text Stream（createTextStreamResponse）",
-        href: "https://ai-sdk.dev/docs/ai-sdk-ui/stream-protocol#text-stream-protocol",
       },
       {
         title: "DeepSeek Provider",
@@ -509,29 +495,24 @@ export default function Home() {
     title: "多轮对话",
     summary: "标准聊天界面 + useChat；消息存服务端（.chats/），刷新后从 API 加载。",
     concepts: [
-      "useChat + DefaultChatTransport — 多轮消息状态、发送与流式渲染",
-      "message.parts — 按 part 渲染 assistant 流式文本",
-      "loadChat / saveChat — 服务端持久化（官方用文件，生产可换数据库）",
-      "toUIMessageStream onEnd — 流结束后把完整 UIMessage[] 写回存储",
-      "useChat id + body chatId — 标识会话，POST 时随 messages 一起发送",
+      "useChat — 聊天 Hook：维护多轮消息、发送消息、流式渲染回复、支持中止",
+      "DefaultChatTransport — useChat 的传输层，指定请求地址并随请求带上会话标识",
+      "convertToModelMessages — 把 UI 消息转成模型能接收的 messages",
+      "toUIMessageStream — 转 UI 消息流，用 originalMessages 与 onEnd 在流结束时拿到完整消息",
     ],
     docLinks: [
-      { title: "Chatbot（useChat）", href: "https://ai-sdk.dev/docs/ai-sdk-ui/chatbot" },
+      { title: "useChat", href: "https://ai-sdk.dev/docs/ai-sdk-ui/chatbot" },
       {
         title: "Chatbot Message Persistence",
         href: "https://ai-sdk.dev/docs/ai-sdk-ui/chatbot-message-persistence",
       },
       {
-        title: "Stream Protocols",
-        href: "https://ai-sdk.dev/docs/ai-sdk-ui/stream-protocol",
-      },
-      {
-        title: "createUIMessageStreamResponse",
-        href: "https://ai-sdk.dev/docs/reference/ai-sdk-ui/create-ui-message-stream-response",
+        title: "createUIMessageStream",
+        href: "https://ai-sdk.dev/docs/reference/ai-sdk-ui/create-ui-message-stream",
       },
       {
         title: "convertToModelMessages",
-        href: "https://ai-sdk.dev/docs/reference/ai-sdk-core/convert-to-model-messages",
+        href: "https://ai-sdk.dev/docs/reference/ai-sdk-ui/convert-to-model-messages",
       },
       {
         title: "DeepSeek Provider",
@@ -784,10 +765,9 @@ export default function Home() {
     summary:
       "综合实战：tool 调用 + message.parts 渲染 React 组件（天气卡片），延续服务端持久化。",
     concepts: [
-      "tool() + inputSchema — 定义模型可调用的工具（zod 约束参数）",
-      "streamText({ tools, stopWhen }) — 服务端执行 tool 并把结果流回客户端",
-      "tool-${name} parts — useChat 消息里按 state 渲染 loading / 组件 / 错误",
-      "Generative UI — tool 结果交给 React 组件，而不只是文本",
+      "tool — 定义模型可调用的工具：description 说明用途、inputSchema 约束参数、execute 返回结果",
+      "isStepCount — 停止条件，配合 streamText 的 stopWhen 限制工具循环的步数",
+      "useChat — 通过消息的 parts 渲染 tool-<toolName> 类型的工具调用与结果",
     ],
     docLinks: [
       {
@@ -798,14 +778,13 @@ export default function Home() {
         title: "Chatbot Tool Usage",
         href: "https://ai-sdk.dev/docs/ai-sdk-ui/chatbot-tool-usage",
       },
-      { title: "Tool Calling（Core）", href: "https://ai-sdk.dev/docs/ai-sdk-core/tools-and-tool-calling" },
       {
-        title: "Chatbot Message Persistence",
-        href: "https://ai-sdk.dev/docs/ai-sdk-ui/chatbot-message-persistence",
+        title: "tool()",
+        href: "https://ai-sdk.dev/docs/reference/ai-sdk-core/tool",
       },
       {
-        title: "DeepSeek Provider",
-        href: "https://ai-sdk.dev/providers/ai-sdk-providers/deepseek",
+        title: "isStepCount",
+        href: "https://ai-sdk.dev/docs/reference/ai-sdk-core/is-step-count",
       },
     ],
     files: [
@@ -895,7 +874,7 @@ export async function POST(req: Request) {
 
   const result = streamText({
     model: deepSeek("deepseek-flash"),
-    system:
+    instructions:
       "You are a friendly assistant. When the user asks about weather, call displayWeather.",
     messages: await convertToModelMessages(messages),
     tools,

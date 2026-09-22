@@ -157,7 +157,7 @@ const OperationDetail = forwardRef<
             .join(" · ")}
         </p>
       )}
-      <CodePanel key={file.path} code={file.code} path={file.path} />
+      <CodePanel key={file.path} code={file.code ?? ""} path={file.path} />
     </section>
   );
 });
