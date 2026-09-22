@@ -11,9 +11,10 @@
 ## 信息架构
 
 - **首页**（`/`）：AI SDK 基本介绍；点左上角进入，不在侧栏菜单。
-- 左侧菜单 = **5 项**：初始化 → 单轮问答 → 流式回复 → 多轮对话 → 生成式 UI。
+- 左侧菜单 = **8 项**：初始化 → 单轮问答 → 流式回复 → 多轮对话 → 生成式 UI → 结构化输出 → UI 消息协议 → 错误处理。
 - 各课页 = 跟做步骤 + 知识点 + 文件 + 代码 + 右侧教学官方文档（`docLinks`）。
-- **API 路径统一**：学员项目只用 `app/api/generate/route.ts`，第 2 课创建，第 3–5 课**覆盖**同文件；`app/page.tsx` 每课覆盖。禁止每课新建 `completion/`、`chat/` 等目录。
+- **知识点规则**：只写 `ai` / `@ai-sdk/react` / `@ai-sdk/deepseek` 里真实存在的方法、返回值和类型，每条 = 方法名 + 一句中文说明它干什么；不写自写函数（`loadChat`/`saveChat`）、不写我们把参数往哪传这类代码层面知识（如 `id + body.chatId`）。
+- **API 路径统一**：学员项目只用 `app/api/generate/route.ts`，第 2 课创建，第 3–8 课**覆盖**同文件；`app/page.tsx` 每课覆盖。禁止每课新建 `completion/`、`chat/` 等目录。
 - 路由：`/` 首页，`/lab/[slug]` 各菜单项；数据在 `lib/projects.ts`。
 
 ## SDK 使用守则（改教程代码前必读，禁止重复造轮子）
@@ -37,7 +38,10 @@
 | 单轮问答 | `generateText` → `Response.json({ text })` | 手写 `fetch` + 本地 state | **有意为之**：非流式 UI 没有 `useGenerateText`；Core 教 `generateText`，客户端自己接 HTTP |
 | 流式回复 | `streamText` → `createUIMessageStreamResponse` + `toUIMessageStream` | `useCompletion` | 禁止手写 fetch 读流、禁止 `toTextStreamResponse()`（v7 已弃用） |
 | 多轮对话 | `streamText` + `onEnd` → `saveChat`；GET 加载历史 | `useChat` + `id` / `chatId` + 挂载时 fetch 恢复 | 禁止 localStorage 存 messages；禁止 `toUIMessageStreamResponse()`（v7 已弃用） |
-| 生成式 UI | 同上 + `tools` + `stopWhen: isStepCount(5)` | `useChat` + 渲染 `tool-*` parts → React 组件 | 禁止 json-render；tool 定义放 `lib/tools.ts` |
+| 生成式 UI | 同上 + `tools` + `stopWhen: isStepCount(5)` | `useChat` + 渲染 `tool-*` parts → React 组件；`approval-requested` 渲染批准 / 拒绝按钮 | 禁止 json-render；tool 定义放 `lib/tools.ts`；敏感工具用 `needsApproval` + `addToolApprovalResponse` |
+| 结构化输出 | `streamText({ output: Output.object({ schema }) })` → `toTextStream` + `createTextStreamResponse` | `useObject` + zod schema | 对象流走**文本流协议**，禁止用 `useCompletion` / `useChat` 接 |
+| UI 消息协议 | `createUIMessageStream` + `writer.write({ type: 'data-*' })` + `writer.merge(toUIMessageStream({ sendReasoning, messageMetadata }))` | `useChat` + `onData`，渲染 `reasoning` / `data-*` part 与 `message.metadata` | 元数据类型放 `lib/message-meta.ts`；transient 数据只走 `onData` |
+| 错误处理 | `createUIMessageStream({ onError })` | `useChat` 的 `error` / `regenerate` / `stop` | 错误文案在 `onError` 里决定，前端不要自己造 |
 
 ### Hook 选型（勿混用）
 
@@ -61,6 +65,8 @@
 2. 服务端返回格式是否与 Hook 的 stream protocol 匹配？
 3. 现有示例是否已在教同一能力？避免流式课与单轮课职责重叠。
 4. 初始化 `INIT_STEPS` 已装 `@ai-sdk/react` 的课，客户端是否用上了对应 Hook？
+5. 示例里新出现的 Core API / Hook / 参数，必须同步写进该课 `concepts`，并在 `docLinks` 挂对应官方文档（指南页 + 有则加 reference）。
+6. 新课的示例代码要写中文注释，讲清关键行为（知识点列表只列方法，注释解释用法）。
 
 ## 开发约定
 

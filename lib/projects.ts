@@ -766,6 +766,9 @@ export default function Home() {
       "综合实战：tool 调用 + message.parts 渲染 React 组件（天气卡片），延续服务端持久化。",
     concepts: [
       "tool — 定义模型可调用的工具：description 说明用途、inputSchema 约束参数、execute 返回结果",
+      "needsApproval — 工具执行前先暂停，等用户批准（消息里出现 approval-requested 状态的 part）",
+      "addToolApprovalResponse — useChat 返回的方法：批准或拒绝某个审批请求，然后继续生成",
+      "lastAssistantMessageIsCompleteWithApprovalResponses — 审批响应齐全后自动接着生成",
       "isStepCount — 停止条件，配合 streamText 的 stopWhen 限制工具循环的步数",
       "useChat — 通过消息的 parts 渲染 tool-<toolName> 类型的工具调用与结果",
     ],
@@ -775,16 +778,20 @@ export default function Home() {
         href: "https://ai-sdk.dev/docs/ai-sdk-ui/generative-user-interfaces",
       },
       {
-        title: "Chatbot Tool Usage",
-        href: "https://ai-sdk.dev/docs/ai-sdk-ui/chatbot-tool-usage",
-      },
-      {
         title: "tool()",
         href: "https://ai-sdk.dev/docs/reference/ai-sdk-core/tool",
       },
       {
+        title: "Tool Approvals",
+        href: "https://ai-sdk.dev/docs/agents/tool-approvals",
+      },
+      {
         title: "isStepCount",
         href: "https://ai-sdk.dev/docs/reference/ai-sdk-core/is-step-count",
+      },
+      {
+        title: "useChat 参考",
+        href: "https://ai-sdk.dev/docs/reference/ai-sdk-ui/use-chat",
       },
     ],
     files: [
@@ -796,19 +803,40 @@ export default function Home() {
         code: `import { tool } from "ai";
 import { z } from "zod";
 
+// 普通工具：模型一调用就执行，结果直接渲染成卡片
 export const weatherTool = tool({
   description: "Display the weather for a location",
+  // inputSchema 用 zod 描述参数，模型生成的参数会按这个结构校验
   inputSchema: z.object({
     location: z.string().describe("The location to get the weather for"),
   }),
+  // execute 在服务端执行，返回值会变成消息 part 里的 output
   execute: async ({ location }) => {
     await new Promise((resolve) => setTimeout(resolve, 800));
     return { weather: "Sunny", temperature: 22, location };
   },
 });
 
+// 敏感工具：发送提醒是对外动作，所以要求用户先批准
+export const weatherAlertTool = tool({
+  description: "Send a weather alert to a user by email",
+  inputSchema: z.object({
+    email: z.string().describe("Recipient email address"),
+    message: z.string().describe("Alert message to send"),
+  }),
+  // 加了 needsApproval 后，模型调用它时不会立刻执行：
+  // 消息里先出现 state 为 approval-requested 的 part，等用户点批准
+  needsApproval: true,
+  execute: async ({ email, message }) => {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    return { email, message, sentAt: new Date().toISOString() };
+  },
+});
+
+// 这里的 key 就是前端看到的 part.type：displayWeather → tool-displayWeather
 export const tools = {
   displayWeather: weatherTool,
+  sendWeatherAlert: weatherAlertTool,
 };`,
       },
       {
@@ -852,6 +880,7 @@ import { tools } from "@/lib/tools";
 
 export const maxDuration = 30;
 
+// 刷新页面时用 GET 把历史消息读回来
 export async function GET(req: Request) {
   const chatId = new URL(req.url).searchParams.get("chatId") ?? "default";
   try {
@@ -874,17 +903,23 @@ export async function POST(req: Request) {
 
   const result = streamText({
     model: deepSeek("deepseek-flash"),
+    // 系统提示（v7 里这个参数叫 instructions）：告诉模型什么时候该用工具
     instructions:
-      "You are a friendly assistant. When the user asks about weather, call displayWeather.",
+      "You are a friendly assistant. When the user asks about weather, call displayWeather. To send an alert, use sendWeatherAlert.",
+    // UI 消息是 parts 结构，要先转成模型认识的 messages
     messages: await convertToModelMessages(messages),
+    // 把工具交给模型，由它决定调不调、调几次
     tools,
+    // 限制工具循环最多 5 步，避免模型反复调用停不下来
     stopWhen: isStepCount(5),
   });
 
   return createUIMessageStreamResponse({
+    // toUIMessageStream 把生成结果转成 UI 消息流（工具调用也在里面），useChat 才能直接消费
     stream: toUIMessageStream({
       stream: result.stream,
       originalMessages: messages,
+      // 流结束后拿到完整的 UIMessage[]，写入存储
       onEnd: ({ messages: finalMessages }) => {
         void saveChat({ chatId, messages: finalMessages });
       },
@@ -896,19 +931,33 @@ export async function POST(req: Request) {
         path: "app/page.tsx",
         order: 4,
         action: "replace",
-        hint: "渲染 tool-displayWeather + 服务端持久化",
+        hint: "渲染 tool parts：天气卡片 + 工具审批按钮",
         code: `"use client";
 
 import { Weather } from "@/components/weather";
 import { useChat } from "@ai-sdk/react";
-import { DefaultChatTransport } from "ai";
+import {
+  DefaultChatTransport,
+  lastAssistantMessageIsCompleteWithApprovalResponses,
+} from "ai";
 import { useEffect, useState } from "react";
 
 const CHAT_ID = "default";
 
 export default function Home() {
-  const { messages, setMessages, sendMessage, status, stop, error } = useChat({
+  const {
+    messages,
+    setMessages,
+    sendMessage,
+    status,
+    stop,
+    error,
+    // 审批用：批准 / 拒绝模型发起的工具调用
+    addToolApprovalResponse,
+  } = useChat({
     id: CHAT_ID,
+    // 审批响应齐全后自动继续生成，不用再点一次发送
+    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
     transport: new DefaultChatTransport({
       api: "/api/generate",
       body: { chatId: CHAT_ID },
@@ -976,6 +1025,90 @@ export default function Home() {
                         );
                       }
 
+                      // 需要审批的工具：模型想调用，但要等用户点头才执行
+                      // 每个状态直接显示状态名，方便看清这个工具调用的生命周期
+                      if (part.type === "tool-sendWeatherAlert") {
+                        switch (part.state) {
+                          case "input-streaming":
+                            return (
+                              <p key={index} className="text-sm text-zinc-400">
+                                input-streaming
+                              </p>
+                            );
+                          case "input-available":
+                            return (
+                              <p key={index} className="text-sm text-zinc-400">
+                                input-available
+                              </p>
+                            );
+                          case "approval-requested":
+                            return (
+                              <div
+                                key={index}
+                                className="space-y-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2"
+                              >
+                                <p className="font-mono text-xs text-zinc-500">
+                                  approval-requested
+                                </p>
+                                <p className="text-sm font-medium">
+                                  需要你批准：发送天气提醒邮件
+                                </p>
+                                {/* 把模型打算传的参数摊开，用户才知道自己在批准什么 */}
+                                <pre className="whitespace-pre-wrap text-xs text-zinc-600">
+                                  {JSON.stringify(part.input, null, 2)}
+                                </pre>
+                                <div className="flex gap-2">
+                                  <button
+                                    type="button"
+                                    className="rounded-md bg-zinc-900 px-3 py-1 text-sm text-white"
+                                    onClick={() =>
+                                      addToolApprovalResponse({
+                                        id: part.approval.id,
+                                        approved: true,
+                                      })
+                                    }
+                                  >
+                                    批准
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="rounded-md border border-zinc-300 px-3 py-1 text-sm"
+                                    onClick={() =>
+                                      addToolApprovalResponse({
+                                        id: part.approval.id,
+                                        approved: false,
+                                      })
+                                    }
+                                  >
+                                    拒绝
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          case "approval-responded":
+                            return (
+                              <p key={index} className="text-sm text-zinc-500">
+                                approval-responded ·{" "}
+                                {part.approval.approved ? "已批准" : "已拒绝"}
+                              </p>
+                            );
+                          case "output-available":
+                            return (
+                              <p key={index} className="text-sm text-zinc-600">
+                                output-available · 提醒已发送
+                              </p>
+                            );
+                          case "output-error":
+                            return (
+                              <p key={index} className="text-sm text-red-600">
+                                output-error · {part.errorText}
+                              </p>
+                            );
+                          default:
+                            return null;
+                        }
+                      }
+
                       if (part.type === "tool-displayWeather") {
                         switch (part.state) {
                           case "input-available":
@@ -1023,6 +1156,28 @@ export default function Home() {
             setInput("");
           }}
         >
+          {/* 示例按钮：点一下直接发送，不用自己打字 */}
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => sendMessage({ text: "旧金山天气怎么样？" })}
+              className="rounded-full border border-zinc-200 px-3 py-1 text-xs text-zinc-600 hover:bg-zinc-50 disabled:opacity-50"
+            >
+              查天气
+            </button>
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() =>
+                sendMessage({ text: "给 hi@example.com 发条天气提醒" })
+              }
+              className="rounded-full border border-zinc-200 px-3 py-1 text-xs text-zinc-600 hover:bg-zinc-50 disabled:opacity-50"
+            >
+              发提醒（需审批）
+            </button>
+          </div>
+
           <label className="block text-sm font-medium">
             消息
             <textarea
@@ -1040,6 +1195,818 @@ export default function Home() {
               className="mt-1 w-full resize-none rounded-lg border border-zinc-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-zinc-200"
             />
           </label>
+          <div className="flex gap-2">
+            <button
+              type="submit"
+              disabled={loading || !input.trim()}
+              className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+            >
+              {loading ? "回复中…" : "发送"}
+            </button>
+            {loading && (
+              <button
+                type="button"
+                onClick={() => stop()}
+                className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+              >
+                停止
+              </button>
+            )}
+          </div>
+        </form>
+      </main>
+    </div>
+  );
+}`,
+      },
+    ],
+  },
+  {
+    kind: "project",
+    slug: "structured-output",
+    title: "结构化输出",
+    summary:
+      "让模型返回对象而不是散文：服务端用 schema 约束输出，客户端 useObject 边收边渲染指标卡。",
+    concepts: [
+      "Output.object — 用 zod schema 约束模型输出的对象结构",
+      "streamText — 配合 output 参数，按 schema 流式产出对象",
+      "toTextStream — 把对象流转换成文本流",
+      "createTextStreamResponse — 把文本流包成 HTTP 响应返回浏览器",
+      "useObject — 结构化输出 Hook：object 边收边补全，配合 isLoading / error 渲染",
+    ],
+    docLinks: [
+      {
+        title: "Generating Structured Data",
+        href: "https://ai-sdk.dev/docs/ai-sdk-core/generating-structured-data",
+      },
+      {
+        title: "Object Generation",
+        href: "https://ai-sdk.dev/docs/ai-sdk-ui/object-generation",
+      },
+      {
+        title: "Output",
+        href: "https://ai-sdk.dev/docs/reference/ai-sdk-core/output",
+      },
+      {
+        title: "useObject",
+        href: "https://ai-sdk.dev/docs/reference/ai-sdk-ui/use-object",
+      },
+    ],
+    files: [
+      {
+        path: "lib/dashboard.ts",
+        order: 1,
+        action: "create",
+        hint: "服务端和客户端共用同一份 schema",
+        code: `import { z } from "zod";
+
+// schema 就是给模型的“表格”：字段名 + 类型，describe 里的说明会影响它的输出质量
+export const dashboardSchema = z.object({
+  title: z.string().describe("看板标题，例如 各渠道 GMV 对比"),
+  metrics: z
+    .array(
+      z.object({
+        label: z.string().describe("指标名，例如 天猫 GMV"),
+        value: z.number().describe("指标数值"),
+        unit: z.string().optional().describe("单位，例如 万元"),
+        delta: z.number().optional().describe("同比变化百分比，可正可负"),
+      }),
+    )
+    .describe("指标卡列表，3 到 4 个"),
+  note: z.string().optional().describe("一句话结论"),
+});
+
+// 页面里也能复用这个类型
+export type Dashboard = z.infer<typeof dashboardSchema>;`,
+      },
+      {
+        path: "components/metric-card.tsx",
+        order: 2,
+        action: "create",
+        hint: "一张指标卡",
+        code: `type MetricCardProps = {
+  label: string;
+  value: number;
+  unit?: string;
+  delta?: number;
+};
+
+export function MetricCard({ label, value, unit, delta }: MetricCardProps) {
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-white px-4 py-3">
+      <p className="text-xs text-zinc-500">{label}</p>
+      <p className="mt-1 text-xl font-semibold">
+        {value}
+        {unit ? <span className="ml-1 text-sm text-zinc-500">{unit}</span> : null}
+      </p>
+      {typeof delta === "number" && (
+        <p
+          className={
+            delta >= 0 ? "text-xs text-emerald-600" : "text-xs text-red-600"
+          }
+        >
+          {delta >= 0 ? "+" : ""}
+          {delta}%
+        </p>
+      )}
+    </div>
+  );
+}`,
+      },
+      {
+        path: "app/api/generate/route.ts",
+        order: 3,
+        action: "replace",
+        hint: "Output.object + 文本流响应",
+        code: `import { dashboardSchema } from "@/lib/dashboard";
+import { createTextStreamResponse, Output, streamText, toTextStream } from "ai";
+import { deepSeek } from "@ai-sdk/deepseek";
+
+export const maxDuration = 30;
+
+export async function POST(req: Request) {
+  if (!process.env.DEEPSEEK_API_KEY) {
+    return Response.json({ error: "请先完成初始化" }, { status: 503 });
+  }
+
+  // useObject 的 submit() 会把字符串当请求体发过来，这里兼容两种写法
+  const body = await req.json();
+  const prompt = typeof body === "string" ? body : (body.prompt ?? "");
+
+  const result = streamText({
+    model: deepSeek("deepseek-flash"),
+    // output 让模型按 schema 产出对象，而不是自由文本
+    output: Output.object({ schema: dashboardSchema }),
+    prompt: "根据这段描述生成一个指标看板：" + prompt,
+  });
+
+  // 对象流要走文本流协议，前端 useObject 才能解析
+  return createTextStreamResponse({
+    stream: toTextStream({ stream: result.stream }),
+  });
+}`,
+      },
+      {
+        path: "app/page.tsx",
+        order: 4,
+        action: "replace",
+        hint: "useObject 边收边渲染",
+        code: `"use client";
+
+import { MetricCard } from "@/components/metric-card";
+import { dashboardSchema } from "@/lib/dashboard";
+import { useObject } from "@ai-sdk/react";
+import { useState } from "react";
+
+export default function Home() {
+  const [prompt, setPrompt] = useState("上月各渠道 GMV 对比，给 3 个指标");
+
+  // object 会随流不断补全：先有 title，再有 metrics[0]、metrics[1]…
+  const { object, submit, isLoading, error, stop } = useObject({
+    api: "/api/generate",
+    schema: dashboardSchema,
+  });
+
+  return (
+    <div className="flex flex-1 flex-col items-center px-4 py-12 font-sans">
+      <main className="w-full max-w-4xl space-y-8">
+        <header className="space-y-2">
+          <h1 className="text-2xl font-semibold tracking-tight">结构化输出</h1>
+          <p className="text-sm text-zinc-500">
+            描述你想要的看板，模型按 schema 返回对象，界面边收边渲染。
+          </p>
+        </header>
+
+        <form
+          className="space-y-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!prompt.trim() || isLoading) return;
+            submit(prompt.trim());
+          }}
+        >
+          <label className="block text-sm font-medium">
+            描述
+            <textarea
+              value={prompt}
+              onChange={(event) => setPrompt(event.target.value)}
+              rows={3}
+              className="mt-1 w-full resize-none rounded-lg border border-zinc-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-zinc-200"
+            />
+          </label>
+
+          <div className="flex gap-2">
+            <button
+              type="submit"
+              disabled={isLoading || !prompt.trim()}
+              className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+            >
+              {isLoading ? "生成中…" : "生成看板"}
+            </button>
+            {isLoading && (
+              <button
+                type="button"
+                onClick={() => stop()}
+                className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+              >
+                停止
+              </button>
+            )}
+          </div>
+        </form>
+
+        {error && <p className="text-sm text-red-600">{error.message}</p>}
+
+        {object && (
+          <section className="space-y-4">
+            <h2 className="text-lg font-medium">{object.title ?? "生成中…"}</h2>
+            <div className="grid gap-3 sm:grid-cols-3">
+              {(object.metrics ?? []).map((metric, index) => (
+                <MetricCard
+                  key={index}
+                  label={metric?.label ?? ""}
+                  value={metric?.value ?? 0}
+                  unit={metric?.unit}
+                  delta={metric?.delta}
+                />
+              ))}
+            </div>
+            {object.note && (
+              <p className="text-sm text-zinc-500">{object.note}</p>
+            )}
+          </section>
+        )}
+      </main>
+    </div>
+  );
+}`,
+      },
+    ],
+  },
+  {
+    kind: "project",
+    slug: "message-protocol",
+    title: "UI 消息协议",
+    summary:
+      "一条消息里除了文字还能带别的：推理过程、自定义数据、元数据。用 createUIMessageStream 自己拼出这条流。",
+    concepts: [
+      "createUIMessageStream — 手写 UI 消息流：writer.write 写自定义数据、writer.merge 合并模型的流",
+      "sendReasoning — 开启后把模型的推理内容作为 reasoning part 发给客户端",
+      "messageMetadata — 在开始/结束事件上附加元数据（如 token 用量），前端从 message.metadata 读取",
+      "onData — useChat 的回调，用来接收 data-* part（transient 的数据不会进入 message.parts）",
+    ],
+    docLinks: [
+      {
+        title: "Streaming Custom Data",
+        href: "https://ai-sdk.dev/docs/ai-sdk-ui/streaming-data",
+      },
+      {
+        title: "Message Metadata",
+        href: "https://ai-sdk.dev/docs/ai-sdk-ui/message-metadata",
+      },
+      {
+        title: "Reasoning",
+        href: "https://ai-sdk.dev/docs/ai-sdk-core/reasoning",
+      },
+      {
+        title: "createUIMessageStream",
+        href: "https://ai-sdk.dev/docs/reference/ai-sdk-ui/create-ui-message-stream",
+      },
+    ],
+    files: [
+      {
+        path: "lib/message-meta.ts",
+        order: 1,
+        action: "create",
+        hint: "元数据与自定义数据的类型，服务端客户端共用",
+        code: `import { type UIMessage } from "ai";
+import { z } from "zod";
+
+// 元数据：服务端写、客户端读，schema 让两边都有类型
+export const messageMetadataSchema = z.object({
+  totalTokens: z.number().optional(),
+});
+
+export type MessageMetadata = z.infer<typeof messageMetadataSchema>;
+
+// 自定义数据 data-status 的结构
+export type ChatDataTypes = { status: { text: string } };
+
+// 带上元数据和自定义数据类型的消息
+export type ChatMessage = UIMessage<MessageMetadata, ChatDataTypes>;`,
+      },
+      {
+        path: "app/api/generate/route.ts",
+        order: 2,
+        action: "replace",
+        hint: "createUIMessageStream + writer + sendReasoning + messageMetadata",
+        code: `import { loadChat, saveChat } from "@/lib/chat-store";
+import {
+  convertToModelMessages,
+  createUIMessageStream,
+  createUIMessageStreamResponse,
+  streamText,
+  toUIMessageStream,
+  type UIMessage,
+} from "ai";
+import { deepSeek } from "@ai-sdk/deepseek";
+
+export const maxDuration = 30;
+
+// 刷新时恢复历史（同第 4 课）
+export async function GET(req: Request) {
+  const chatId = new URL(req.url).searchParams.get("chatId") ?? "default";
+  try {
+    const messages = await loadChat(chatId);
+    return Response.json({ messages });
+  } catch {
+    return Response.json({ messages: [] });
+  }
+}
+
+export async function POST(req: Request) {
+  if (!process.env.DEEPSEEK_API_KEY) {
+    return Response.json({ error: "请先完成初始化" }, { status: 503 });
+  }
+
+  const {
+    messages,
+    chatId = "default",
+  }: { messages: UIMessage[]; chatId?: string } = await req.json();
+
+  const result = streamText({
+    model: deepSeek("deepseek-flash"),
+    messages: await convertToModelMessages(messages),
+    // 打开 DeepSeek 的思考模式，模型会先产出推理内容
+    providerOptions: { deepseek: { thinking: { type: "enabled" } } },
+  });
+
+  const stream = createUIMessageStream({
+    async execute({ writer }) {
+      // 自定义数据：type 必须以 data- 开头
+      // transient 的数据不进消息历史，只通过 onData 送到前端
+      writer.write({
+        type: "data-status",
+        data: { text: "正在思考…" },
+        transient: true,
+      });
+
+      // 把模型的流转换成 UI 消息流，再合并进我们自己写的这条流
+      writer.merge(
+        toUIMessageStream({
+          stream: result.stream,
+          originalMessages: messages,
+          // 把推理内容也发给前端（默认不发送）
+          sendReasoning: true,
+          // 元数据：流结束时写入 token 用量，前端从 message.metadata 读
+          messageMetadata: ({ part }) =>
+            part.type === "finish"
+              ? { totalTokens: part.totalUsage.totalTokens }
+              : undefined,
+          onEnd: ({ messages: finalMessages }) => {
+            void saveChat({ chatId, messages: finalMessages });
+          },
+        }),
+      );
+    },
+  });
+
+  return createUIMessageStreamResponse({ stream });
+}`,
+      },
+      {
+        path: "app/page.tsx",
+        order: 3,
+        action: "replace",
+        hint: "渲染 reasoning part、onData 状态、message.metadata",
+        code: `"use client";
+
+import type { ChatMessage } from "@/lib/message-meta";
+import { useChat } from "@ai-sdk/react";
+import { DefaultChatTransport } from "ai";
+import { useEffect, useState } from "react";
+
+const CHAT_ID = "default";
+
+export default function Home() {
+  const [liveStatus, setLiveStatus] = useState("");
+  const [input, setInput] = useState("");
+
+  // 泛型写上消息类型，message.metadata 与 data part 才有类型
+  const { messages, setMessages, sendMessage, status, stop, error } =
+    useChat<ChatMessage>({
+      id: CHAT_ID,
+      transport: new DefaultChatTransport({
+        api: "/api/generate",
+        body: { chatId: CHAT_ID },
+        fetch: async (input, init) => {
+          const res = await fetch(input, init);
+          if (res.status === 503) {
+            const data = await res.json().catch(() => ({}));
+            throw new Error(
+              typeof data.error === "string" ? data.error : "请先完成初始化",
+            );
+          }
+          return res;
+        },
+      }),
+      // 自定义数据（transient）只会走这里，不会进入 message.parts
+      onData: (dataPart) => {
+        if (dataPart.type === "data-status") {
+          setLiveStatus(dataPart.data.text);
+        }
+      },
+    });
+
+  const loading = status === "streaming" || status === "submitted";
+
+  useEffect(() => {
+    fetch(\`/api/generate?chatId=\${CHAT_ID}\`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (Array.isArray(data.messages) && data.messages.length > 0) {
+          setMessages(data.messages);
+        }
+      })
+      .catch(() => {});
+  }, [setMessages]);
+
+  return (
+    <div className="flex flex-1 flex-col items-center px-4 py-8 font-sans">
+      <main className="flex min-h-0 w-full max-w-4xl flex-1 flex-col gap-4">
+        <header className="shrink-0 space-y-2">
+          <h1 className="text-2xl font-semibold tracking-tight">UI 消息协议</h1>
+          <p className="text-sm text-zinc-500">
+            回复里同时包含思考过程、实时状态与 token 用量。
+          </p>
+        </header>
+
+        {/* 自定义数据：来自 onData 的实时状态 */}
+        {loading && liveStatus && (
+          <p className="shrink-0 text-xs text-zinc-500">{liveStatus}</p>
+        )}
+
+        <div className="min-h-[240px] flex-1 overflow-y-auto rounded-lg border border-zinc-200 bg-white p-4">
+          {messages.length === 0 ? (
+            <p className="text-sm text-zinc-400">发送第一条消息开始对话</p>
+          ) : (
+            <ul className="space-y-4">
+              {messages.map((message) => (
+                <li
+                  key={message.id}
+                  className={
+                    message.role === "user" ? "flex justify-end" : "flex justify-start"
+                  }
+                >
+                  <div
+                    className={
+                      message.role === "user"
+                        ? "max-w-[85%] rounded-lg bg-zinc-900 px-3 py-2 text-sm leading-6 text-white"
+                        : "max-w-[85%] space-y-2 rounded-lg bg-zinc-100 px-3 py-2 text-sm leading-6 text-zinc-900"
+                    }
+                  >
+                    {message.parts.map((part, index) => {
+                      if (part.type === "text") {
+                        return (
+                          <span key={index} className="whitespace-pre-wrap">
+                            {part.text}
+                          </span>
+                        );
+                      }
+
+                      // 推理内容：模型在想什么，折叠显示
+                      if (part.type === "reasoning") {
+                        return (
+                          <details
+                            key={index}
+                            className="rounded-md bg-white/70 px-2 py-1 text-xs text-zinc-500"
+                          >
+                            <summary>思考过程</summary>
+                            <p className="mt-1 whitespace-pre-wrap">{part.text}</p>
+                          </details>
+                        );
+                      }
+
+                      return null;
+                    })}
+
+                    {/* 元数据：服务端在流结束时写进来的 token 用量 */}
+                    {message.role === "assistant" &&
+                      message.metadata?.totalTokens != null && (
+                        <p className="text-[11px] text-zinc-400">
+                          用量 {message.metadata.totalTokens} tokens
+                        </p>
+                      )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        {error && (
+          <p className="shrink-0 text-sm text-red-600">{error.message}</p>
+        )}
+
+        <form
+          className="shrink-0 space-y-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!input.trim() || loading) return;
+            sendMessage({ text: input.trim() });
+            setInput("");
+          }}
+        >
+          <label className="block text-sm font-medium">
+            消息
+            <textarea
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.nativeEvent.isComposing) return;
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  event.currentTarget.form?.requestSubmit();
+                }
+              }}
+              rows={2}
+              placeholder="例如：帮我分析一下怎么学 AI SDK"
+              className="mt-1 w-full resize-none rounded-lg border border-zinc-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-zinc-200"
+            />
+          </label>
+          <div className="flex gap-2">
+            <button
+              type="submit"
+              disabled={loading || !input.trim()}
+              className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+            >
+              {loading ? "回复中…" : "发送"}
+            </button>
+            {loading && (
+              <button
+                type="button"
+                onClick={() => stop()}
+                className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+              >
+                停止
+              </button>
+            )}
+          </div>
+        </form>
+      </main>
+    </div>
+  );
+}`,
+      },
+    ],
+  },
+  {
+    kind: "project",
+    slug: "error-handling",
+    title: "错误处理",
+    summary:
+      "让聊天失败时也不崩：服务端把异常转成错误文本，前端提示、重试、中止。",
+    concepts: [
+      "onError — createUIMessageStream 的错误处理：把服务端异常转成前端能读到的错误文本",
+      "error — useChat 返回的错误对象，status 变成 error 时展示提示",
+      "regenerate — 失败后重新生成最后一条回复",
+      "stop — 中止正在进行的流式回复",
+    ],
+    docLinks: [
+      {
+        title: "Error Handling（UI）",
+        href: "https://ai-sdk.dev/docs/ai-sdk-ui/error-handling",
+      },
+      {
+        title: "Error Handling（Core）",
+        href: "https://ai-sdk.dev/docs/ai-sdk-core/error-handling",
+      },
+      {
+        title: "createUIMessageStream",
+        href: "https://ai-sdk.dev/docs/reference/ai-sdk-ui/create-ui-message-stream",
+      },
+      {
+        title: "useChat 参考",
+        href: "https://ai-sdk.dev/docs/reference/ai-sdk-ui/use-chat",
+      },
+    ],
+    files: [
+      {
+        path: "app/api/generate/route.ts",
+        order: 1,
+        action: "replace",
+        hint: "createUIMessageStream + onError",
+        code: `import { loadChat, saveChat } from "@/lib/chat-store";
+import {
+  convertToModelMessages,
+  createUIMessageStream,
+  createUIMessageStreamResponse,
+  streamText,
+  toUIMessageStream,
+  type UIMessage,
+} from "ai";
+import { deepSeek } from "@ai-sdk/deepseek";
+
+export const maxDuration = 30;
+
+// 刷新时恢复历史（同第 4 课）
+export async function GET(req: Request) {
+  const chatId = new URL(req.url).searchParams.get("chatId") ?? "default";
+  try {
+    const messages = await loadChat(chatId);
+    return Response.json({ messages });
+  } catch {
+    return Response.json({ messages: [] });
+  }
+}
+
+export async function POST(req: Request) {
+  if (!process.env.DEEPSEEK_API_KEY) {
+    return Response.json({ error: "请先完成初始化" }, { status: 503 });
+  }
+
+  const {
+    messages,
+    chatId = "default",
+    // 前端勾选「模拟错误」时会带上这个标记，方便演示失败情况
+    simulateError = false,
+  }: { messages: UIMessage[]; chatId?: string; simulateError?: boolean } =
+    await req.json();
+
+  const stream = createUIMessageStream({
+    async execute({ writer }) {
+      if (simulateError) {
+        // 流里抛出的错误会交给下面的 onError 处理
+        throw new Error("模拟的服务端错误：模型调用失败");
+      }
+
+      const result = streamText({
+        model: deepSeek("deepseek-flash"),
+        messages: await convertToModelMessages(messages),
+      });
+
+      writer.merge(
+        toUIMessageStream({
+          stream: result.stream,
+          originalMessages: messages,
+          onEnd: ({ messages: finalMessages }) => {
+            void saveChat({ chatId, messages: finalMessages });
+          },
+        }),
+      );
+    },
+    // 决定错误以什么文案传给前端（前端从 useChat 的 error 里读）
+    onError: (error) =>
+      error instanceof Error ? error.message : "生成失败，请稍后重试",
+  });
+
+  return createUIMessageStreamResponse({ stream });
+}`,
+      },
+      {
+        path: "app/page.tsx",
+        order: 2,
+        action: "replace",
+        hint: "错误提示 + 重试 + 模拟失败开关",
+        code: `"use client";
+
+import { useChat } from "@ai-sdk/react";
+import { DefaultChatTransport } from "ai";
+import { useEffect, useState } from "react";
+
+const CHAT_ID = "default";
+
+export default function Home() {
+  const [simulateError, setSimulateError] = useState(false);
+  const [input, setInput] = useState("");
+
+  const { messages, setMessages, sendMessage, status, stop, error, regenerate } =
+    useChat({
+      id: CHAT_ID,
+      transport: new DefaultChatTransport({
+        api: "/api/generate",
+        // body 写成函数：每次请求都读取最新的开关状态
+        body: () => ({ chatId: CHAT_ID, simulateError }),
+        fetch: async (input, init) => {
+          const res = await fetch(input, init);
+          if (res.status === 503) {
+            const data = await res.json().catch(() => ({}));
+            throw new Error(
+              typeof data.error === "string" ? data.error : "请先完成初始化",
+            );
+          }
+          return res;
+        },
+      }),
+    });
+
+  const loading = status === "streaming" || status === "submitted";
+
+  useEffect(() => {
+    fetch(\`/api/generate?chatId=\${CHAT_ID}\`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (Array.isArray(data.messages) && data.messages.length > 0) {
+          setMessages(data.messages);
+        }
+      })
+      .catch(() => {});
+  }, [setMessages]);
+
+  return (
+    <div className="flex flex-1 flex-col items-center px-4 py-8 font-sans">
+      <main className="flex min-h-0 w-full max-w-4xl flex-1 flex-col gap-4">
+        <header className="shrink-0 space-y-2">
+          <h1 className="text-2xl font-semibold tracking-tight">错误处理</h1>
+          <p className="text-sm text-zinc-500">
+            勾选下面的开关制造一次失败，再点重试。
+          </p>
+        </header>
+
+        <div className="min-h-[240px] flex-1 overflow-y-auto rounded-lg border border-zinc-200 bg-white p-4">
+          {messages.length === 0 ? (
+            <p className="text-sm text-zinc-400">发送第一条消息开始对话</p>
+          ) : (
+            <ul className="space-y-4">
+              {messages.map((message) => (
+                <li
+                  key={message.id}
+                  className={
+                    message.role === "user" ? "flex justify-end" : "flex justify-start"
+                  }
+                >
+                  <div
+                    className={
+                      message.role === "user"
+                        ? "max-w-[85%] rounded-lg bg-zinc-900 px-3 py-2 text-sm leading-6 text-white"
+                        : "max-w-[85%] rounded-lg bg-zinc-100 px-3 py-2 text-sm leading-6 text-zinc-900"
+                    }
+                  >
+                    {message.parts.map((part, index) =>
+                      part.type === "text" ? (
+                        <span key={index} className="whitespace-pre-wrap">
+                          {part.text}
+                        </span>
+                      ) : null,
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        {error && (
+          <div className="flex shrink-0 items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2">
+            <p className="text-sm text-red-700">{error.message}</p>
+            {/* 失败后用 regenerate 重新生成最后一条回复 */}
+            <button
+              type="button"
+              onClick={() => regenerate()}
+              disabled={!(status === "ready" || status === "error")}
+              className="shrink-0 rounded-md border border-red-300 px-3 py-1 text-sm text-red-700 disabled:opacity-50"
+            >
+              重试
+            </button>
+          </div>
+        )}
+
+        <form
+          className="shrink-0 space-y-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!input.trim() || loading) return;
+            sendMessage({ text: input.trim() });
+            setInput("");
+          }}
+        >
+          <label className="block text-sm font-medium">
+            消息
+            <textarea
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.nativeEvent.isComposing) return;
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  event.currentTarget.form?.requestSubmit();
+                }
+              }}
+              rows={2}
+              placeholder="输入消息…"
+              className="mt-1 w-full resize-none rounded-lg border border-zinc-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-zinc-200"
+            />
+          </label>
+
+          <label className="flex items-center gap-2 text-xs text-zinc-500">
+            <input
+              type="checkbox"
+              checked={simulateError}
+              onChange={(event) => setSimulateError(event.target.checked)}
+            />
+            模拟服务端错误
+          </label>
+
           <div className="flex gap-2">
             <button
               type="submit"
