@@ -1448,7 +1448,7 @@ export default function Home() {
     slug: "message-protocol",
     title: "UI 消息协议",
     summary:
-      "一条消息里除了文字还能带别的：推理过程、自定义数据、元数据。用 createUIMessageStream 自己拼出这条流。",
+      "让过程留在界面上：步骤卡、深度思考、token 用量都跟着消息走，用 createUIMessageStream 自己拼出这条流。",
     concepts: [
       "createUIMessageStream — 手写 UI 消息流：writer.write 写自定义数据、writer.merge 合并模型的流",
       "sendReasoning — 开启后把模型的推理内容作为 reasoning part 发给客户端",
@@ -1483,14 +1483,21 @@ export default function Home() {
 import { z } from "zod";
 
 // 元数据：服务端写、客户端读，schema 让两边都有类型
+// 流开始时写 model，结束时补 totalTokens —— 所以两个字段都是可选的
 export const messageMetadataSchema = z.object({
+  model: z.string().optional(),
   totalTokens: z.number().optional(),
 });
 
 export type MessageMetadata = z.infer<typeof messageMetadataSchema>;
 
-// 自定义数据 data-status 的结构
-export type ChatDataTypes = { status: { text: string } };
+// 自定义数据类型：
+// - step 会留在消息里（data-step part）
+// - status 是 transient 的，只走 onData，不进消息历史
+export type ChatDataTypes = {
+  step: { label: string; status: "running" | "done" };
+  status: { text: string };
+};
 
 // 带上元数据和自定义数据类型的消息
 export type ChatMessage = UIMessage<MessageMetadata, ChatDataTypes>;`,
@@ -1524,6 +1531,13 @@ export async function GET(req: Request) {
   }
 }
 
+// 清空记录：把存档覆盖成空数组
+export async function DELETE(req: Request) {
+  const chatId = new URL(req.url).searchParams.get("chatId") ?? "default";
+  await saveChat({ chatId, messages: [] });
+  return Response.json({ ok: true });
+}
+
 export async function POST(req: Request) {
   if (!process.env.DEEPSEEK_API_KEY) {
     return Response.json({ error: "请先完成初始化" }, { status: 503 });
@@ -1534,21 +1548,44 @@ export async function POST(req: Request) {
     chatId = "default",
   }: { messages: UIMessage[]; chatId?: string } = await req.json();
 
-  const result = streamText({
-    model: deepSeek("deepseek-flash"),
-    messages: await convertToModelMessages(messages),
-    // 打开 DeepSeek 的思考模式，模型会先产出推理内容
-    providerOptions: { deepseek: { thinking: { type: "enabled" } } },
-  });
-
   const stream = createUIMessageStream({
     async execute({ writer }) {
-      // 自定义数据：type 必须以 data- 开头
-      // transient 的数据不进消息历史，只通过 onData 送到前端
+      // 官方要求：先写 start 开启这条 assistant 消息，再写任何 part
+      writer.write({ type: "start" });
+
+      // transient 的数据不进消息历史，只通过 onData 送到前端（用完就丢）
       writer.write({
         type: "data-status",
         data: { text: "正在思考…" },
         transient: true,
+      });
+
+      // 自定义数据：type 必须以 data- 开头，会作为 data-step part 留在消息里
+      // 写一次 = 多一条步骤；用同一个 id 再写 = 原地更新那一条
+      writer.write({
+        type: "data-step",
+        id: "step-receive",
+        data: { label: "接收问题", status: "done" },
+      });
+      writer.write({
+        type: "data-step",
+        id: "step-answer",
+        data: { label: "生成回复", status: "running" },
+      });
+
+      const result = streamText({
+        model: deepSeek("deepseek-flash"),
+        messages: await convertToModelMessages(messages),
+        // 打开 DeepSeek 的思考模式：模型先想再答，思考过程作为 reasoning part 发出去
+        providerOptions: { deepseek: { thinking: { type: "enabled" } } },
+        onEnd() {
+          // 模型这条流结束：用同一个 id 把上面那条步骤改成完成
+          writer.write({
+            type: "data-step",
+            id: "step-answer",
+            data: { label: "生成回复", status: "done" },
+          });
+        },
       });
 
       // 把模型的流转换成 UI 消息流，再合并进我们自己写的这条流
@@ -1556,13 +1593,22 @@ export async function POST(req: Request) {
         toUIMessageStream({
           stream: result.stream,
           originalMessages: messages,
+          // start 已经由外层写过了，这里不要再写一次
+          sendStart: false,
           // 把推理内容也发给前端（默认不发送）
           sendReasoning: true,
-          // 元数据：流结束时写入 token 用量，前端从 message.metadata 读
-          messageMetadata: ({ part }) =>
-            part.type === "finish"
-              ? { totalTokens: part.totalUsage.totalTokens }
-              : undefined,
+          // 元数据写两次：开始时给模型名，结束时补 token 用量
+          messageMetadata: ({ part }) => {
+            if (part.type === "start") {
+              return { model: "deepseek-flash" };
+            }
+            if (part.type === "finish") {
+              return {
+                model: "deepseek-flash",
+                totalTokens: part.totalUsage.totalTokens,
+              };
+            }
+          },
           onEnd: ({ messages: finalMessages }) => {
             void saveChat({ chatId, messages: finalMessages });
           },
@@ -1578,7 +1624,7 @@ export async function POST(req: Request) {
         path: "app/page.tsx",
         order: 3,
         action: "replace",
-        hint: "渲染 reasoning part、onData 状态、message.metadata",
+        hint: "渲染 steps 卡、reasoning、message.metadata",
         code: `"use client";
 
 import type { ChatMessage } from "@/lib/message-meta";
@@ -1631,14 +1677,30 @@ export default function Home() {
       .catch(() => {});
   }, [setMessages]);
 
+  // 清空记录：服务端删掉存档，本地消息也清掉，界面立刻变空
+  async function handleClear() {
+    await fetch("/api/generate?chatId=" + CHAT_ID, { method: "DELETE" });
+    setMessages([]);
+  }
+
   return (
     <div className="flex flex-1 flex-col items-center px-4 py-8 font-sans">
       <main className="flex min-h-0 w-full max-w-4xl flex-1 flex-col gap-4">
-        <header className="shrink-0 space-y-2">
-          <h1 className="text-2xl font-semibold tracking-tight">UI 消息协议</h1>
-          <p className="text-sm text-zinc-500">
-            回复里同时包含思考过程、实时状态与 token 用量。
-          </p>
+        <header className="flex shrink-0 items-start justify-between gap-4">
+          <div className="space-y-2">
+            <h1 className="text-2xl font-semibold tracking-tight">UI 消息协议</h1>
+            <p className="text-sm text-zinc-500">
+              每条回复会留下：步骤卡、深度思考、模型与 token 用量。
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleClear}
+            disabled={messages.length === 0 || loading}
+            className="shrink-0 rounded-lg border border-zinc-200 px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50 disabled:opacity-50"
+          >
+            清空记录
+          </button>
         </header>
 
         {/* 自定义数据：来自 onData 的实时状态 */}
@@ -1665,6 +1727,16 @@ export default function Home() {
                         : "max-w-[85%] space-y-2 rounded-lg bg-zinc-100 px-3 py-2 text-sm leading-6 text-zinc-900"
                     }
                   >
+                    {/* 元数据：流一开始就有模型名，结束时补上 token 用量 */}
+                    {message.role === "assistant" && message.metadata && (
+                      <p className="font-mono text-[11px] text-zinc-400">
+                        {message.metadata.model ?? "assistant"}
+                        {message.metadata.totalTokens != null
+                          ? " · " + message.metadata.totalTokens + " tokens"
+                          : " · 生成中…"}
+                      </p>
+                    )}
+
                     {message.parts.map((part, index) => {
                       if (part.type === "text") {
                         return (
@@ -1674,29 +1746,38 @@ export default function Home() {
                         );
                       }
 
-                      // 推理内容：模型在想什么，折叠显示
+                      // 推理内容：模型在想什么，折叠显示，会一直留在消息里
                       if (part.type === "reasoning") {
                         return (
                           <details
                             key={index}
                             className="rounded-md bg-white/70 px-2 py-1 text-xs text-zinc-500"
                           >
-                            <summary>思考过程</summary>
+                            <summary>
+                              {part.state === "streaming"
+                                ? "深度思考中…（" + part.text.length + " 字）"
+                                : "深度思考（" + part.text.length + " 字）"}
+                            </summary>
                             <p className="mt-1 whitespace-pre-wrap">{part.text}</p>
                           </details>
                         );
                       }
 
+                      // 自定义数据：一条步骤一行，同一 id 会被原地更新
+                      if (part.type === "data-step") {
+                        return (
+                          <p
+                            key={index}
+                            className="flex items-center gap-2 font-mono text-[11px] text-zinc-500"
+                          >
+                            <span>{part.data.status === "done" ? "✓" : "…"}</span>
+                            {part.data.label}
+                          </p>
+                        );
+                      }
+
                       return null;
                     })}
-
-                    {/* 元数据：服务端在流结束时写进来的 token 用量 */}
-                    {message.role === "assistant" &&
-                      message.metadata?.totalTokens != null && (
-                        <p className="text-[11px] text-zinc-400">
-                          用量 {message.metadata.totalTokens} tokens
-                        </p>
-                      )}
                   </div>
                 </li>
               ))}
@@ -1820,6 +1901,13 @@ export async function GET(req: Request) {
   }
 }
 
+// 清空记录：把存档覆盖成空数组
+export async function DELETE(req: Request) {
+  const chatId = new URL(req.url).searchParams.get("chatId") ?? "default";
+  await saveChat({ chatId, messages: [] });
+  return Response.json({ ok: true });
+}
+
 export async function POST(req: Request) {
   if (!process.env.DEEPSEEK_API_KEY) {
     return Response.json({ error: "请先完成初始化" }, { status: 503 });
@@ -1913,14 +2001,31 @@ export default function Home() {
       .catch(() => {});
   }, [setMessages]);
 
+  // 清空记录：服务端删掉存档，本地消息也清掉，界面立刻变空
+  async function handleClear() {
+    await fetch("/api/generate?chatId=" + CHAT_ID, { method: "DELETE" });
+    setMessages([]);
+    setSimulateError(false);
+  }
+
   return (
     <div className="flex flex-1 flex-col items-center px-4 py-8 font-sans">
       <main className="flex min-h-0 w-full max-w-4xl flex-1 flex-col gap-4">
-        <header className="shrink-0 space-y-2">
-          <h1 className="text-2xl font-semibold tracking-tight">错误处理</h1>
-          <p className="text-sm text-zinc-500">
-            勾选下面的开关制造一次失败，再点重试。
-          </p>
+        <header className="flex shrink-0 items-start justify-between gap-4">
+          <div className="space-y-2">
+            <h1 className="text-2xl font-semibold tracking-tight">错误处理</h1>
+            <p className="text-sm text-zinc-500">
+              勾选下面的开关制造一次失败，再点重试。
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleClear}
+            disabled={messages.length === 0 || loading}
+            className="shrink-0 rounded-lg border border-zinc-200 px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50 disabled:opacity-50"
+          >
+            清空记录
+          </button>
         </header>
 
         <div className="min-h-[240px] flex-1 overflow-y-auto rounded-lg border border-zinc-200 bg-white p-4">
