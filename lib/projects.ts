@@ -1695,6 +1695,8 @@ export async function POST(req: Request) {
     lastUser?.parts.map((part) => (part.type === "text" ? part.text : "")).join("") ?? "";
 
   const stream = createUIMessageStream({
+    // composer 也要拿到历史，onEnd 才能给出「历史 + 本轮」的完整 messages
+    originalMessages: messages,
     async execute({ writer }) {
       // 官方要求：先写 start 开启这条 assistant 消息，再写任何 part
       writer.write({ type: "start" });
@@ -1782,11 +1784,13 @@ export async function POST(req: Request) {
               };
             }
           },
-          onEnd: ({ messages: finalMessages }) => {
-            void saveChat({ chatId, messages: finalMessages });
-          },
         }),
       );
+    },
+    // 存完整 messages：这里的 onEnd 才包含我们自己写的 data-* part
+    // （toUIMessageStream 的 onEnd 只有模型产出的部分，会丢掉 data-*）
+    onEnd: ({ messages: finalMessages }) => {
+      void saveChat({ chatId, messages: finalMessages });
     },
   });
 
