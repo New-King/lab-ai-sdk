@@ -588,6 +588,13 @@ export async function GET(req: Request) {
   }
 }
 
+// 清空记录：把存档覆盖成空数组
+export async function DELETE(req: Request) {
+  const chatId = new URL(req.url).searchParams.get("chatId") ?? "default";
+  await saveChat({ chatId, messages: [] });
+  return Response.json({ ok: true });
+}
+
 export async function POST(req: Request) {
   if (!process.env.DEEPSEEK_API_KEY) {
     return Response.json({ error: "请先完成初始化" }, { status: 503 });
@@ -659,14 +666,30 @@ export default function Home() {
       .catch(() => {});
   }, [setMessages]);
 
+  // 清空记录：服务端删掉存档，本地消息也清掉，界面立刻变空
+  async function handleClear() {
+    await fetch("/api/generate?chatId=" + CHAT_ID, { method: "DELETE" });
+    setMessages([]);
+  }
+
   return (
     <div className="flex flex-1 flex-col items-center px-4 py-8 font-sans">
       <main className="flex min-h-0 w-full max-w-4xl flex-1 flex-col gap-4">
-        <header className="shrink-0 space-y-2">
-          <h1 className="text-2xl font-semibold tracking-tight">多轮对话</h1>
-          <p className="text-sm text-zinc-500">
-            连续聊天；消息保存在服务端 .chats/，刷新后自动恢复。
-          </p>
+        <header className="flex shrink-0 items-start justify-between gap-4">
+          <div className="space-y-2">
+            <h1 className="text-2xl font-semibold tracking-tight">多轮对话</h1>
+            <p className="text-sm text-zinc-500">
+              连续聊天；消息保存在服务端 .chats/，刷新后自动恢复。
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleClear}
+            disabled={messages.length === 0 || loading}
+            className="shrink-0 rounded-lg border border-zinc-200 px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50 disabled:opacity-50"
+          >
+            清空记录
+          </button>
         </header>
 
         <div className="min-h-[240px] flex-1 overflow-y-auto rounded-lg border border-zinc-200 bg-white p-4">
@@ -891,6 +914,13 @@ export async function GET(req: Request) {
   }
 }
 
+// 清空记录：把存档覆盖成空数组
+export async function DELETE(req: Request) {
+  const chatId = new URL(req.url).searchParams.get("chatId") ?? "default";
+  await saveChat({ chatId, messages: [] });
+  return Response.json({ ok: true });
+}
+
 export async function POST(req: Request) {
   if (!process.env.DEEPSEEK_API_KEY) {
     return Response.json({ error: "请先完成初始化" }, { status: 503 });
@@ -987,14 +1017,30 @@ export default function Home() {
       .catch(() => {});
   }, [setMessages]);
 
+  // 清空记录：服务端删掉存档，本地消息也清掉，界面立刻变空
+  async function handleClear() {
+    await fetch("/api/generate?chatId=" + CHAT_ID, { method: "DELETE" });
+    setMessages([]);
+  }
+
   return (
     <div className="flex flex-1 flex-col items-center px-4 py-8 font-sans">
       <main className="flex min-h-0 w-full max-w-4xl flex-1 flex-col gap-4">
-        <header className="shrink-0 space-y-2">
-          <h1 className="text-2xl font-semibold tracking-tight">生成式 UI</h1>
-          <p className="text-sm text-zinc-500">
-            问「旧金山天气怎么样」— 模型调 tool，回复里出现天气卡片而不只是文字。
-          </p>
+        <header className="flex shrink-0 items-start justify-between gap-4">
+          <div className="space-y-2">
+            <h1 className="text-2xl font-semibold tracking-tight">生成式 UI</h1>
+            <p className="text-sm text-zinc-500">
+              问「旧金山天气怎么样」— 模型调 tool，回复里出现天气卡片而不只是文字。
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleClear}
+            disabled={messages.length === 0 || loading}
+            className="shrink-0 rounded-lg border border-zinc-200 px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50 disabled:opacity-50"
+          >
+            清空记录
+          </button>
         </header>
 
         <div className="min-h-[240px] flex-1 overflow-y-auto rounded-lg border border-zinc-200 bg-white p-4">
@@ -1362,7 +1408,8 @@ export default function Home() {
   const [prompt, setPrompt] = useState("上月各渠道 GMV 对比，给 3 个指标");
 
   // object 会随流不断补全：先有 title，再有 metrics[0]、metrics[1]…
-  const { object, submit, isLoading, error, stop } = useObject({
+  // clear 是 useObject 自带的方法：把当前 object 清空
+  const { object, submit, isLoading, error, stop, clear } = useObject({
     api: "/api/generate",
     schema: dashboardSchema,
   });
@@ -1370,11 +1417,21 @@ export default function Home() {
   return (
     <div className="flex flex-1 flex-col items-center px-4 py-12 font-sans">
       <main className="w-full max-w-4xl space-y-8">
-        <header className="space-y-2">
-          <h1 className="text-2xl font-semibold tracking-tight">结构化输出</h1>
-          <p className="text-sm text-zinc-500">
-            描述你想要的看板，模型按 schema 返回对象，界面边收边渲染。
-          </p>
+        <header className="flex items-start justify-between gap-4">
+          <div className="space-y-2">
+            <h1 className="text-2xl font-semibold tracking-tight">结构化输出</h1>
+            <p className="text-sm text-zinc-500">
+              描述你想要的看板，模型按 schema 返回对象，界面边收边渲染。
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => clear()}
+            disabled={!object || isLoading}
+            className="shrink-0 rounded-lg border border-zinc-200 px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50 disabled:opacity-50"
+          >
+            清空
+          </button>
         </header>
 
         <form
@@ -1448,7 +1505,7 @@ export default function Home() {
     slug: "message-protocol",
     title: "UI 消息协议",
     summary:
-      "让过程留在界面上：步骤卡、深度思考、token 用量都跟着消息走，用 createUIMessageStream 自己拼出这条流。",
+      "知识库问答：先检索（接后端）、展示引用来源，再让模型作答 —— 这些步骤和来源都留在消息里，用 createUIMessageStream 自己拼出这条流。",
     concepts: [
       "createUIMessageStream — 手写 UI 消息流：writer.write 写自定义数据、writer.merge 合并模型的流",
       "sendReasoning — 开启后把模型的推理内容作为 reasoning part 发给客户端",
@@ -1475,8 +1532,35 @@ export default function Home() {
     ],
     files: [
       {
-        path: "lib/message-meta.ts",
+        path: "lib/knowledge.ts",
         order: 1,
+        action: "create",
+        hint: "假的知识库检索：真实项目里换成查向量库 / 搜索 API / 你们的后端",
+        code: `// 真实项目里，这个函数就是"接后端"的位置：
+// 换成 await fetch("https://你们的检索接口")、查数据库、或调向量库都行
+export type Doc = { title: string; url: string };
+
+export async function searchKnowledge(question: string): Promise<Doc[]> {
+  // 模拟检索耗时，让界面上的步骤能看清
+  await new Promise((resolve) => setTimeout(resolve, 1200));
+
+  // 假装命中了 3 条资料（真实项目里由后端返回）
+  return [
+    { title: "AI SDK 入门", url: "https://ai-sdk.dev/docs/introduction" },
+    {
+      title: "Generating Text（" + question.slice(0, 8) + "…）",
+      url: "https://ai-sdk.dev/docs/ai-sdk-core/generating-text",
+    },
+    {
+      title: "Tools and Tool Calling",
+      url: "https://ai-sdk.dev/docs/ai-sdk-core/tools-and-tool-calling",
+    },
+  ];
+}`,
+      },
+      {
+        path: "lib/message-meta.ts",
+        order: 2,
         action: "create",
         hint: "元数据与自定义数据的类型，服务端客户端共用",
         code: `import { type UIMessage } from "ai";
@@ -1492,10 +1576,11 @@ export const messageMetadataSchema = z.object({
 export type MessageMetadata = z.infer<typeof messageMetadataSchema>;
 
 // 自定义数据类型：
-// - step 会留在消息里（data-step part）
+// - step / sources 会留在消息里（data-step、data-sources part）
 // - status 是 transient 的，只走 onData，不进消息历史
 export type ChatDataTypes = {
   step: { label: string; status: "running" | "done" };
+  sources: { items: { title: string; url: string }[] };
   status: { text: string };
 };
 
@@ -1504,9 +1589,9 @@ export type ChatMessage = UIMessage<MessageMetadata, ChatDataTypes>;`,
       },
       {
         path: "app/api/generate/route.ts",
-        order: 2,
+        order: 3,
         action: "replace",
-        hint: "createUIMessageStream + writer + sendReasoning + messageMetadata",
+        hint: "检索（接后端）→ 步骤 → 来源 → 模型流",
         code: `import { loadChat, saveChat } from "@/lib/chat-store";
 import {
   convertToModelMessages,
@@ -1517,6 +1602,7 @@ import {
   type UIMessage,
 } from "ai";
 import { deepSeek } from "@ai-sdk/deepseek";
+import { searchKnowledge } from "@/lib/knowledge";
 
 export const maxDuration = 30;
 
@@ -1548,33 +1634,65 @@ export async function POST(req: Request) {
     chatId = "default",
   }: { messages: UIMessage[]; chatId?: string } = await req.json();
 
+  // 检索用的问题：取最后一条用户消息的文本
+  const lastUser = messages.filter((message) => message.role === "user").pop();
+  const question =
+    lastUser?.parts.map((part) => (part.type === "text" ? part.text : "")).join("") ?? "";
+
   const stream = createUIMessageStream({
     async execute({ writer }) {
       // 官方要求：先写 start 开启这条 assistant 消息，再写任何 part
       writer.write({ type: "start" });
 
-      // transient 的数据不进消息历史，只通过 onData 送到前端（用完就丢）
+      // transient 数据：不进消息历史，只通过 onData 送到前端，用来显示"正在干什么"
       writer.write({
         type: "data-status",
-        data: { text: "正在思考…" },
+        data: { text: "正在检索知识库…" },
         transient: true,
       });
 
-      // 自定义数据：type 必须以 data- 开头，会作为 data-step part 留在消息里
-      // 写一次 = 多一条步骤；用同一个 id 再写 = 原地更新那一条
+      // 第 1 步：检索。searchKnowledge 就是"接后端"的位置（本课是假数据 + 1.2 秒耗时）
       writer.write({
         type: "data-step",
-        id: "step-receive",
-        data: { label: "接收问题", status: "done" },
+        id: "step-search",
+        data: { label: "检索知识库…", status: "running" },
       });
+
+      const docs = await searchKnowledge(question);
+
+      // 同一个 id 再写一次 = 原地更新那条步骤，把真实结果写进去
+      writer.write({
+        type: "data-step",
+        id: "step-search",
+        data: { label: "检索知识库 · 命中 " + docs.length + " 条", status: "done" },
+      });
+
+      // 后端返回的来源：模型之外的数据，挂在消息上，随消息一起保存
+      writer.write({
+        type: "data-sources",
+        id: "sources",
+        data: { items: docs },
+      });
+
+      writer.write({
+        type: "data-status",
+        data: { text: "正在生成回答…" },
+        transient: true,
+      });
+
+      // 第 2 步：生成回答
       writer.write({
         type: "data-step",
         id: "step-answer",
-        data: { label: "生成回复", status: "running" },
+        data: { label: "生成回答…", status: "running" },
       });
 
       const result = streamText({
         model: deepSeek("deepseek-flash"),
+        // 把检索到的资料交给模型，让回答有依据
+        instructions:
+          "回答用户问题时优先依据这些资料：" +
+          docs.map((doc) => doc.title + "（" + doc.url + "）").join("；"),
         messages: await convertToModelMessages(messages),
         // 打开 DeepSeek 的思考模式：模型先想再答，思考过程作为 reasoning part 发出去
         providerOptions: { deepseek: { thinking: { type: "enabled" } } },
@@ -1583,7 +1701,7 @@ export async function POST(req: Request) {
           writer.write({
             type: "data-step",
             id: "step-answer",
-            data: { label: "生成回复", status: "done" },
+            data: { label: "生成回答 · 完成", status: "done" },
           });
         },
       });
@@ -1622,9 +1740,9 @@ export async function POST(req: Request) {
       },
       {
         path: "app/page.tsx",
-        order: 3,
+        order: 4,
         action: "replace",
-        hint: "渲染 steps 卡、reasoning、message.metadata",
+        hint: "渲染步骤、来源卡、reasoning、message.metadata",
         code: `"use client";
 
 import type { ChatMessage } from "@/lib/message-meta";
@@ -1690,7 +1808,7 @@ export default function Home() {
           <div className="space-y-2">
             <h1 className="text-2xl font-semibold tracking-tight">UI 消息协议</h1>
             <p className="text-sm text-zinc-500">
-              每条回复会留下：步骤卡、深度思考、模型与 token 用量。
+              每条回复会留下：检索步骤、引用来源、深度思考、token 用量。
             </p>
           </div>
           <button
@@ -1776,6 +1894,29 @@ export default function Home() {
                         );
                       }
 
+                      // 后端返回的来源：模型之外的数据，跟着这条消息一起存
+                      if (part.type === "data-sources") {
+                        return (
+                          <div
+                            key={index}
+                            className="space-y-1 rounded-md border border-zinc-200 bg-white px-3 py-2"
+                          >
+                            <p className="text-xs font-medium text-zinc-500">来源</p>
+                            {part.data.items.map((item) => (
+                              <a
+                                key={item.url}
+                                href={item.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="block text-xs text-blue-600 hover:underline"
+                              >
+                                {item.title}
+                              </a>
+                            ))}
+                          </div>
+                        );
+                      }
+
                       return null;
                     })}
                   </div>
@@ -1811,7 +1952,7 @@ export default function Home() {
                 }
               }}
               rows={2}
-              placeholder="例如：帮我分析一下怎么学 AI SDK"
+              placeholder="例如：AI SDK 怎么调用工具？"
               className="mt-1 w-full resize-none rounded-lg border border-zinc-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-zinc-200"
             />
           </label>
