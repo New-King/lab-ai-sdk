@@ -71,3 +71,9 @@ body {
 .code-panel-shiki .line {
   min-width: max-content;
 }
+
+/* Tailwind v4 的 preflight 把按钮光标设成箭头，统一改回手型 */
+button:not(:disabled),
+[role="button"] {
+  cursor: pointer;
+}

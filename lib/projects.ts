@@ -110,12 +110,21 @@ export type GuideProject = {
   docLinks: DocLink[];
 };
 
+/** 知识点右上角「更多」弹窗里的文章 */
+export type ConceptArticle = {
+  title: string;
+  /** 每项一段：`## ` 开头是小标题，`- ` 开头是要点，``` 之间是代码 */
+  body: string[];
+};
+
 export type LabProject = {
   kind: "project";
   slug: string;
   title: string;
   summary: string;
   concepts: string[];
+  /** 可选：知识点旁的延伸阅读 */
+  conceptArticle?: ConceptArticle;
   files: ProjectFile[];
   docLinks: DocLink[];
 };
@@ -1512,6 +1521,52 @@ export default function Home() {
       "messageMetadata — 在开始/结束事件上附加元数据（如 token 用量），前端从 message.metadata 读取",
       "onData — useChat 的回调，用来接收 data-* part（transient 的数据不会进入 message.parts）",
     ],
+    conceptArticle: {
+      title: "UI 消息流扩展：data parts 的适用范围与后端接入方式",
+      body: [
+        "本文补充说明本课使用的 data-* part（下称 data parts）的适用范围，以及在不同后端形态下的接入方式。",
+        "## 一、data parts 是什么",
+        "- 对话接口的响应采用 UI 消息流协议（UIMessage stream），其中每段内容称为一个 part。text、reasoning、tool-* 由 SDK 依据模型输出生成，data-* 由服务端自行写入。",
+        "- data-* 的 type 必须以 data- 开头，可携带任意 JSON。两个特性：与某条 assistant 消息绑定；随消息一起持久化（本课存于 .chats/ 的即完整 UIMessage[]）。",
+        "- 与「把数据交给模型」需区分：写入 instructions 或 messages 影响模型输出，用户不可见；写入 writer.write({ type: 'data-*' }) 影响界面，模型不可见。两者可独立使用。",
+        "## 二、适用范围",
+        "- 需要把模型之外的数据随该轮回答一并展示：检索来源、外部查询结果、业务回执。",
+        "- 需要展示服务端的处理过程：步骤、进度、耗时。",
+        "- 需要随消息保存、在刷新或回看时恢复的附加信息。",
+        "## 三、后端接入方式",
+        "### Node / TypeScript",
+        "- 手写组合（本示例使用）：createUIMessageStream + writer.write + writer.merge，需要向流中插入自定义内容时使用。",
+        "### 其他语言（Java / Go / Python 等）",
+        "- 不依赖 AI SDK，按协议手写 Server-Sent Events 即可，前端 useChat 无需改动。自定义后端需设置响应头 x-vercel-ai-ui-message-stream: v1，报文示例如下：",
+        "```",
+        "x-vercel-ai-ui-message-stream: v1",
+        "",
+        "data: {\"type\":\"start\",\"messageId\":\"m1\"}",
+        "",
+        "data: {\"type\":\"data-sources\",\"data\":{\"items\":[{\"title\":\"来源A\",\"url\":\"https://a.com\"}]}}",
+        "",
+        "data: {\"type\":\"text-start\",\"id\":\"t1\"}",
+        "",
+        "data: {\"type\":\"text-delta\",\"id\":\"t1\",\"delta\":\"这是回答\"}",
+        "",
+        "data: {\"type\":\"text-end\",\"id\":\"t1\"}",
+        "",
+        "data: {\"type\":\"finish\"}",
+        "```",
+        "### 第三方或不可控的对话接口",
+        "- 若接口由第三方提供且不遵循该协议，前端无法补出 data parts。两种可行做法：前端分别调用检索、查询等接口并用组件状态渲染；或在中间层（如 Next.js Route Handler）将第三方输出转换为 UI 消息流后返回。",
+        "### 使用 Mastra 作为后端",
+        "- @mastra/ai-sdk 提供 handleChatStream()、handleWorkflowStream() 等处理器，返回的流可直接交给 createUIMessageStreamResponse()；亦可通过 chatRoute() 注册路由。",
+        "- 工作流与多 agent 的执行进度以 data-workflow、data-workflow-step、data-network 等 part 下发，前端渲染方式与本课一致。",
+        "- 注意事项：version 需与所安装的 AI SDK 版本对应；启用 memory 时客户端只发送最新一条消息，历史由服务端管理。",
+        "## 四、不需要 data parts 的情况",
+        "- 对话输出仅包含文本。",
+        "- 数据由前端自行请求（前端分别调用检索与对话接口），可直接使用组件状态渲染。",
+        "## 五、要点",
+        "- data parts 属于服务端能力，可用性取决于对话接口的实现方。",
+        "- 其作用是在保持单一对话接口的前提下，把服务端内部的过程与数据传递给前端，并与消息一同保存与恢复。",
+      ],
+    },
     docLinks: [
       {
         title: "Streaming Custom Data",

@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef, useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useRef, useState, type ReactNode } from "react";
 import { CodePanel } from "@/components/code-panel";
 import { DocLinksSidebar } from "@/components/doc-links-sidebar";
 import {
@@ -13,6 +13,7 @@ import {
   getFileActionLabel,
   getLabOperations,
   getOrderLabel,
+  type ConceptArticle,
   type LabOperation,
   type LabProject,
 } from "@/lib/projects";
@@ -39,7 +40,10 @@ export function ProjectView({ project }: { project: LabProject }) {
             <p className="text-sm leading-6 text-muted">{project.summary}</p>
           </header>
 
-          <ConceptList concepts={project.concepts} />
+          <ConceptList
+            concepts={project.concepts}
+            article={project.conceptArticle}
+          />
 
           <div className={`mt-6 ${labFileGrid}`}>
             <OperationList
@@ -60,10 +64,44 @@ export function ProjectView({ project }: { project: LabProject }) {
   );
 }
 
-function ConceptList({ concepts }: { concepts: string[] }) {
+function ConceptList({
+  concepts,
+  article,
+}: {
+  concepts: string[];
+  article?: ConceptArticle;
+}) {
+  const [showArticle, setShowArticle] = useState(false);
+
   return (
     <section className="space-y-2">
-      <h2 className="text-sm font-semibold">知识点</h2>
+      <div className="flex items-start gap-1.5">
+        <h2 className="text-sm font-semibold">知识点</h2>
+        {article && (
+          <button
+            type="button"
+            onClick={() => setShowArticle(true)}
+            title={"延伸阅读：" + article.title}
+            aria-label="延伸阅读"
+            className="-mt-1 flex cursor-pointer items-center gap-0.5 rounded-b-md rounded-t-sm border border-neutral-200 bg-white px-1.5 py-0.5 text-[10px] leading-none text-neutral-500 transition-colors hover:border-neutral-300 hover:text-foreground"
+          >
+            more
+            <svg
+              viewBox="0 0 20 20"
+              className="h-2.5 w-2.5"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M7 5l6 5-6 5" />
+            </svg>
+          </button>
+        )}
+      </div>
+
       <ul className="space-y-2">
         {concepts.map((concept) => (
           <li
@@ -74,8 +112,123 @@ function ConceptList({ concepts }: { concepts: string[] }) {
           </li>
         ))}
       </ul>
+
+      {article && showArticle && (
+        <ConceptArticleModal
+          article={article}
+          onClose={() => setShowArticle(false)}
+        />
+      )}
     </section>
   );
+}
+
+/** 知识点「更多」：当前窗口弹出的延伸阅读 */
+function ConceptArticleModal({
+  article,
+  onClose,
+}: {
+  article: ConceptArticle;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 sm:p-6"
+      onClick={onClose}
+    >
+      <div
+        className="mt-[4vh] flex max-h-[88vh] w-full max-w-2xl min-w-0 flex-col overflow-hidden rounded-xl border border-border bg-white shadow-xl"
+        onClick={(event) => event.stopPropagation()}
+      >
+        {/* 标题栏固定，只有正文滚动，保证底部边界始终在视口内 */}
+        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-border px-5 py-4">
+          <h3 className="text-base font-semibold text-foreground">
+            {article.title}
+          </h3>
+          <button
+            type="button"
+            onClick={onClose}
+            className="shrink-0 rounded-md border border-border px-2 py-0.5 text-xs text-muted hover:bg-neutral-100"
+          >
+            关闭
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+          <ArticleBody lines={article.body} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** 极简渲染：`## ` 小标题、`- ` 要点、``` 代码块、其余当段落 */
+function ArticleBody({ lines }: { lines: string[] }) {
+  const blocks: ReactNode[] = [];
+  let code: string[] | null = null;
+
+  lines.forEach((line, index) => {
+    if (line.trim() === "```") {
+      if (code) {
+        blocks.push(
+          <pre
+            key={"code-" + index}
+            className="max-w-full overflow-x-auto rounded-lg bg-neutral-100 p-3 font-mono text-xs leading-5 text-neutral-700"
+          >
+            {code.join("\n")}
+          </pre>,
+        );
+        code = null;
+      } else {
+        code = [];
+      }
+      return;
+    }
+
+    if (code) {
+      code.push(line);
+      return;
+    }
+
+    if (line.startsWith("### ")) {
+      blocks.push(
+        <h5 key={index} className="pt-1 text-xs font-semibold text-neutral-600">
+          {line.slice(4)}
+        </h5>,
+      );
+      return;
+    }
+
+    if (line.startsWith("## ")) {
+      blocks.push(
+        <h4 key={index} className="pt-2 text-sm font-semibold text-foreground">
+          {line.slice(3)}
+        </h4>,
+      );
+      return;
+    }
+
+    if (line.startsWith("- ")) {
+      blocks.push(
+        <p key={index} className="pl-4">
+          · {line.slice(2)}
+        </p>,
+      );
+      return;
+    }
+
+    blocks.push(<p key={index}>{line}</p>);
+  });
+
+  return <div className="space-y-3 text-sm leading-6 text-muted">{blocks}</div>;
 }
 
 function OperationList({
