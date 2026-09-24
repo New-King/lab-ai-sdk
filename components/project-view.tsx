@@ -83,12 +83,12 @@ function ConceptList({
             onClick={() => setShowArticle(true)}
             title={"延伸阅读：" + article.title}
             aria-label="延伸阅读"
-            className="-mt-1.5 flex cursor-pointer items-center gap-0.5 rounded-b-md rounded-t-sm bg-neutral-900 px-2 py-1 text-[10px] font-medium leading-none text-white transition-colors hover:bg-neutral-700"
+            className="group -mt-1.5 flex cursor-pointer items-center gap-0.5 rounded-b-md rounded-t-sm bg-neutral-700 px-2 py-1 text-[10px] font-medium leading-none text-white transition-colors hover:bg-neutral-600"
           >
             延伸阅读
             <svg
               viewBox="0 0 20 20"
-              className="h-2.5 w-2.5"
+              className="h-2.5 w-2.5 transition-transform duration-200 group-hover:translate-x-0.5"
               fill="none"
               stroke="currentColor"
               strokeWidth="2.5"
