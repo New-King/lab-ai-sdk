@@ -1517,7 +1517,7 @@ export default function Home() {
       "知识库问答：先检索（接后端）、展示引用来源，再让模型作答 —— 这些步骤和来源都留在消息里，用 createUIMessageStream 自己拼出这条流。",
     concepts: [
       "createUIMessageStream — 手写 UI 消息流：writer.write 写自定义数据、writer.merge 合并模型的流",
-      "sendReasoning — 开启后把模型的推理内容作为 reasoning part 发给客户端",
+      "sendReasoning — 把模型的推理内容作为 reasoning part 发给客户端（默认已开启，显式写出更清楚）",
       "messageMetadata — 在开始/结束事件上附加元数据（如 token 用量），前端从 message.metadata 读取",
       "onData — useChat 的回调，用来接收 data-* part（transient 的数据不会进入 message.parts）",
     ],
@@ -1771,7 +1771,7 @@ export async function POST(req: Request) {
           originalMessages: messages,
           // start 已经由外层写过了，这里不要再写一次
           sendStart: false,
-          // 把推理内容也发给前端（默认不发送）
+          // 把推理内容也发给前端（sendReasoning 默认就是 true，这里显式写出来）
           sendReasoning: true,
           // 元数据写两次：开始时给模型名，结束时补 token 用量
           messageMetadata: ({ part }) => {
@@ -2049,7 +2049,7 @@ export default function Home() {
     summary:
       "让聊天失败时也不崩：服务端把异常转成错误文本，前端提示、重试、中止。",
     concepts: [
-      "onError — createUIMessageStream 的错误处理：把服务端异常转成前端能读到的错误文本",
+      "onError — createUIMessageStream 的错误处理：把服务端异常转成前端能读到的错误文本（不写则默认掩码为 An error occurred.）",
       "error — useChat 返回的错误对象，status 变成 error 时展示提示",
       "regenerate — 失败后重新生成最后一条回复",
       "stop — 中止正在进行的流式回复",
@@ -2145,6 +2145,7 @@ export async function POST(req: Request) {
       );
     },
     // 决定错误以什么文案传给前端（前端从 useChat 的 error 里读）
+    // 不写的话默认返回 "An error occurred."：SDK 默认不把服务端错误细节暴露给客户端
     onError: (error) =>
       error instanceof Error ? error.message : "生成失败，请稍后重试",
   });
