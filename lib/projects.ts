@@ -2051,25 +2051,67 @@ export default function Home() {
     slug: "error-handling",
     title: "错误处理",
     summary:
-      "让聊天失败时也不崩：服务端把异常转成错误文本，前端提示、重试、中止。",
+      "让聊天失败时也不崩：服务端把报错转成可读文案，前端提示 + 重试。",
     concepts: [
-      "onError — createUIMessageStream 的错误处理：把服务端异常转成前端能读到的错误文本（不写则默认掩码为 An error occurred.）",
-      "error — useChat 返回的错误对象，status 变成 error 时展示提示",
-      "regenerate — 重新生成最后一条 assistant 消息（若那次失败连消息都没创建，就没有可重试的对象）",
-      "stop — 中止正在进行的流式回复",
+      "onError — 决定错误以什么文案发给前端（默认掩码成 An error occurred.，看不到真实原因）",
+      "regenerate — 重新生成最后一条 assistant 消息",
     ],
+    conceptArticle: {
+      title: "错误与重试：错误流的形态、重试语义与后端接入",
+      body: [
+        "本文补充说明本课的两件事：错误在流里长什么样、前端点重试时后端要做什么，以及后端不用 AI SDK 时如何接入。",
+        "## 一、错误在流里长什么样",
+        "- 正常结束：start → start-step → text-start → text-delta（多次）→ text-end → finish-step → finish。",
+        "- 出错结束：start → error。前端收到 error 后，useChat 的 status 变为 error，error.message 即 errorText，页面据此显示提示与重试按钮。",
+        '- errorText 由服务端 toUIMessageStream 的 onError 决定；不写则默认掩码为 "An error occurred."，真实报错只留在服务端日志里。',
+        "```",
+        'data: {"type":"start"}',
+        "",
+        'data: {"type":"error","errorText":"模型调用失败，请稍后重试"}',
+        "```",
+        '- 需区分两类失败：流内错误（模型报错、工具执行失败）走上面的 error 报文，文案由 onError 决定；HTTP 层失败（如缺少密钥返回 503）不是 UI 消息流而是普通 JSON，SDK 解析不了，需要在前端 transport 的 fetch 里自行转成 Error（本课 page.tsx 即如此）。',
+        "## 二、点重试时发生了什么",
+        "- 前端：regenerate() 先把 messages 里最后一条 assistant 回复删除（若最后一条是 user 则保留），再用同一个 POST 端点重新发送。",
+        '- 请求体因此变为 { id, messages, trigger: "regenerate-message", messageId }。messageId 默认为 undefined，只有显式 regenerate({ messageId }) 时才有值。',
+        "- 后端：把请求里的 messages 当作完整历史即可。重试不需要单独的接口或额外字段。",
+        "- 例外：若后端另有历史来源（数据库或模型侧 thread / memory）并以其为准，需在生成前去掉最后一条 assistant 回复，否则被重做的回复会重复出现在上下文里。",
+        "## 三、originalMessages 的作用（本课传了它）",
+        "- 作用一：让 onEnd 拿到「历史 + 本轮回复」的完整 messages；不传则只有本轮回复，持久化会把记录截断成一条。",
+        "- 作用二：若历史最后一条是 assistant（续写场景），SDK 会让本轮 start 复用那条的 messageId，语义为覆盖那条消息。",
+        "- 本课失败那轮的 UI 表现：start 报文不带 messageId，前端不会立刻新建 assistant 消息，因此重试等价于「把最后一条用户消息再问一遍」。若希望失败也留下一条可替换的消息，可给 toUIMessageStream 传入 generateMessageId（如 ai 导出的 generateId）。",
+        "## 四、后端不用 AI SDK 时如何接入",
+        "- 与第 7 课延伸阅读同理：不依赖 AI SDK，按协议手写 Server-Sent Events 即可，前端 useChat 无需改动。",
+        "- 后端只需做两件事：把 messages[].parts 中 type 为 text 的内容拼成模型输入（等价于 convertToModelMessages）；按下面的报文返回。",
+        "```",
+        "x-vercel-ai-ui-message-stream: v1",
+        "",
+        'data: {"type":"start"}',
+        "",
+        'data: {"type":"text-start","id":"t1"}',
+        "",
+        'data: {"type":"text-delta","id":"t1","delta":"你好"}',
+        "",
+        'data: {"type":"text-end","id":"t1"}',
+        "",
+        'data: {"type":"finish"}',
+        "",
+        "data: [DONE]",
+        "```",
+        '- 流必须以 data: [DONE] 收尾；出错时把中间部分换成 data: {"type":"error","errorText":"..."}。重试请求只是多一个 trigger 字段，按普通请求处理即可。',
+        "## 五、要点",
+        "- 重试的语义是「丢掉最后一条 assistant 回复，用同样的历史再生成一次」，前端已按此截断历史。",
+        "- 后端是否要额外配合，取决于历史的来源：以请求体为准则无需处理；另有历史来源则需回滚最后一条 assistant 回复。",
+        "- 错误文案与错误是否可见，都由服务端的 onError 决定。",
+      ],
+    },
     docLinks: [
       {
         title: "Error Handling（UI）",
         href: "https://ai-sdk.dev/docs/ai-sdk-ui/error-handling",
       },
       {
-        title: "Error Handling（Core）",
-        href: "https://ai-sdk.dev/docs/ai-sdk-core/error-handling",
-      },
-      {
-        title: "createUIMessageStream",
-        href: "https://ai-sdk.dev/docs/reference/ai-sdk-ui/create-ui-message-stream",
+        title: "streamText 参考",
+        href: "https://ai-sdk.dev/docs/reference/ai-sdk-core/stream-text",
       },
       {
         title: "useChat 参考",
@@ -2081,11 +2123,10 @@ export default function Home() {
         path: "app/api/generate/route.ts",
         order: 1,
         action: "replace",
-        hint: "createUIMessageStream + onError",
+        hint: "toUIMessageStream + onError",
         code: `import { loadChat, saveChat } from "@/lib/chat-store";
 import {
   convertToModelMessages,
-  createUIMessageStream,
   createUIMessageStreamResponse,
   streamText,
   toUIMessageStream,
@@ -2121,56 +2162,41 @@ export async function POST(req: Request) {
   const {
     messages,
     chatId = "default",
-    // 前端勾选「模拟错误」时会带上这个标记，方便演示失败情况
+    // 前端勾选「模拟模型报错」时会带上这个标记
     simulateError = false,
   }: { messages: UIMessage[]; chatId?: string; simulateError?: boolean } =
     await req.json();
 
-  const stream = createUIMessageStream({
-    // composer 也拿到历史，onEnd 才能给出完整 messages
-    originalMessages: messages,
-    async execute({ writer }) {
-      // 先写 start 开一条 assistant 消息：不然出错时前端连消息都没有，
-      // regenerate()（重试按钮）就没有可重试的对象，点了不会动
-      writer.write({ type: "start" });
-
-      if (simulateError) {
-        // 流里抛出的错误会交给下面的 onError 处理
-        throw new Error("模拟的服务端错误：模型调用失败");
-      }
-
-      const result = streamText({
-        model: deepSeek("deepseek-flash"),
-        messages: await convertToModelMessages(messages),
-      });
-
-      writer.merge(
-        toUIMessageStream({
-          stream: result.stream,
-          originalMessages: messages,
-          // start 已经由外层写过了
-          sendStart: false,
-        }),
-      );
-    },
-    // 决定错误以什么文案传给前端（前端从 useChat 的 error 里读）
-    // 不写的话默认返回 "An error occurred."：SDK 默认不把服务端错误细节暴露给客户端
-    onError: (error) =>
-      error instanceof Error ? error.message : "生成失败，请稍后重试",
-    // 流结束后存完整 messages（放 composer 这层，和写出去的流一致）
-    onEnd: ({ messages: finalMessages }) => {
-      void saveChat({ chatId, messages: finalMessages });
-    },
+  const result = streamText({
+    // 演示用：打开开关时故意把模型名写错，制造一次真实的模型调用失败
+    model: deepSeek(simulateError ? "deepseek-flash-typo" : "deepseek-flash"),
+    messages: await convertToModelMessages(messages),
   });
 
-  return createUIMessageStreamResponse({ stream });
+  return createUIMessageStreamResponse({
+    stream: toUIMessageStream({
+      stream: result.stream,
+      // 历史消息：onEnd 才能拿到「历史 + 这条新回复」，存档不会只剩一条
+      originalMessages: messages,
+      // 决定错误以什么文案发给前端：不写的话默认掩码成 "An error occurred."
+      // error 是真实报错（这里打日志），用户看到的是我们能控制的那句话
+      onError: (error) => {
+        console.error("[generate] 模型调用失败:", error);
+        return "模型调用失败，请稍后重试";
+      },
+      // 流结束后存完整 messages
+      onEnd: ({ messages: finalMessages }) => {
+        void saveChat({ chatId, messages: finalMessages });
+      },
+    }),
+  });
 }`,
       },
       {
         path: "app/page.tsx",
         order: 2,
         action: "replace",
-        hint: "错误提示 + 重试 + 模拟失败开关",
+        hint: "错误提示 + 重试 + 模拟模型报错",
         code: `"use client";
 
 import { useChat } from "@ai-sdk/react";
@@ -2190,6 +2216,8 @@ export default function Home() {
         api: "/api/generate",
         // body 写成函数：每次请求都读取最新的开关状态
         body: () => ({ chatId: CHAT_ID, simulateError }),
+        // 503 时服务端返回的是普通 JSON、不是 UI 消息流，SDK 解析不了，
+        // 所以要自己把它翻成一个 Error，useChat 才会放进 error
         fetch: async (input, init) => {
           const res = await fetch(input, init);
           if (res.status === 503) {
@@ -2324,7 +2352,7 @@ export default function Home() {
               checked={simulateError}
               onChange={(event) => setSimulateError(event.target.checked)}
             />
-            模拟服务端错误
+            模拟模型报错
           </label>
 
           <div className="flex gap-2">

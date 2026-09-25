@@ -41,7 +41,7 @@
 | 生成式 UI | 同上 + `tools` + `stopWhen: isStepCount(5)` | `useChat` + 渲染 `tool-*` parts → React 组件；`approval-requested` 渲染批准 / 拒绝按钮 | 禁止 json-render；tool 定义放 `lib/tools.ts`；敏感工具用 `needsApproval` + `addToolApprovalResponse` |
 | 结构化输出 | `streamText({ output: Output.object({ schema }) })` → `toTextStream` + `createTextStreamResponse` | `useObject` + zod schema | 对象流走**文本流协议**，禁止用 `useCompletion` / `useChat` 接 |
 | UI 消息协议 | `createUIMessageStream` + `writer.write({ type: 'data-*' })` + `writer.merge(toUIMessageStream({ sendReasoning, messageMetadata }))` | `useChat` + `onData`，渲染 `reasoning` / `data-*` part 与 `message.metadata` | 元数据类型放 `lib/message-meta.ts`；transient 数据只走 `onData` |
-| 错误处理 | `createUIMessageStream({ onError })` | `useChat` 的 `error` / `regenerate` / `stop` | 错误文案在 `onError` 里决定，前端不要自己造 |
+| 错误处理 | `createUIMessageStreamResponse({ stream: toUIMessageStream({ originalMessages, onError, onEnd }) })` | `useChat` 的 `error` / `regenerate` | 不要为这节课再上 `createUIMessageStream`（那是第 7 课）；禁用已 deprecated 的 `result.toUIMessageStreamResponse()`；错误文案在 `onError` 里决定 |
 
 ### Hook 选型（勿混用）
 
