@@ -505,19 +505,23 @@ export default function Home() {
     summary: "标准聊天界面 + useChat；消息存服务端（.chats/），刷新后从 API 加载。",
     concepts: [
       "useChat — 聊天 Hook：维护多轮消息、发送消息、流式渲染回复、支持中止",
-      "DefaultChatTransport — useChat 的传输层，指定请求地址并随请求带上会话标识",
+      "DefaultChatTransport — useChat 的传输层（走 HTTP）：指定 api 地址，并随请求发送额外字段",
       "convertToModelMessages — 把 UI 消息转成模型能接收的 messages",
       "toUIMessageStream — 转 UI 消息流，用 originalMessages 与 onEnd 在流结束时拿到完整消息",
     ],
     docLinks: [
       { title: "useChat", href: "https://ai-sdk.dev/docs/ai-sdk-ui/chatbot" },
       {
+        title: "Transport（DefaultChatTransport）",
+        href: "https://ai-sdk.dev/docs/ai-sdk-ui/transport",
+      },
+      {
         title: "Chatbot Message Persistence",
         href: "https://ai-sdk.dev/docs/ai-sdk-ui/chatbot-message-persistence",
       },
       {
-        title: "createUIMessageStream",
-        href: "https://ai-sdk.dev/docs/reference/ai-sdk-ui/create-ui-message-stream",
+        title: "createUIMessageStreamResponse",
+        href: "https://ai-sdk.dev/docs/reference/ai-sdk-ui/create-ui-message-stream-response",
       },
       {
         title: "convertToModelMessages",
@@ -2051,7 +2055,7 @@ export default function Home() {
     concepts: [
       "onError — createUIMessageStream 的错误处理：把服务端异常转成前端能读到的错误文本（不写则默认掩码为 An error occurred.）",
       "error — useChat 返回的错误对象，status 变成 error 时展示提示",
-      "regenerate — 失败后重新生成最后一条回复",
+      "regenerate — 重新生成最后一条 assistant 消息（若那次失败连消息都没创建，就没有可重试的对象）",
       "stop — 中止正在进行的流式回复",
     ],
     docLinks: [
@@ -2123,7 +2127,13 @@ export async function POST(req: Request) {
     await req.json();
 
   const stream = createUIMessageStream({
+    // composer 也拿到历史，onEnd 才能给出完整 messages
+    originalMessages: messages,
     async execute({ writer }) {
+      // 先写 start 开一条 assistant 消息：不然出错时前端连消息都没有，
+      // regenerate()（重试按钮）就没有可重试的对象，点了不会动
+      writer.write({ type: "start" });
+
       if (simulateError) {
         // 流里抛出的错误会交给下面的 onError 处理
         throw new Error("模拟的服务端错误：模型调用失败");
@@ -2138,9 +2148,8 @@ export async function POST(req: Request) {
         toUIMessageStream({
           stream: result.stream,
           originalMessages: messages,
-          onEnd: ({ messages: finalMessages }) => {
-            void saveChat({ chatId, messages: finalMessages });
-          },
+          // start 已经由外层写过了
+          sendStart: false,
         }),
       );
     },
@@ -2148,6 +2157,10 @@ export async function POST(req: Request) {
     // 不写的话默认返回 "An error occurred."：SDK 默认不把服务端错误细节暴露给客户端
     onError: (error) =>
       error instanceof Error ? error.message : "生成失败，请稍后重试",
+    // 流结束后存完整 messages（放 composer 这层，和写出去的流一致）
+    onEnd: ({ messages: finalMessages }) => {
+      void saveChat({ chatId, messages: finalMessages });
+    },
   });
 
   return createUIMessageStreamResponse({ stream });
@@ -2266,7 +2279,7 @@ export default function Home() {
         {error && (
           <div className="flex shrink-0 items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2">
             <p className="text-sm text-red-700">{error.message}</p>
-            {/* 失败后用 regenerate 重新生成最后一条回复 */}
+            {/* 失败后用 regenerate 重新生成最后一条 assistant 消息 */}
             <button
               type="button"
               onClick={() => regenerate()}
