@@ -1621,8 +1621,9 @@ export async function searchKnowledge(question: string): Promise<Doc[]> {
         code: `import { type UIMessage } from "ai";
 import { z } from "zod";
 
-// 元数据：服务端写、客户端读，schema 让两边都有类型
+// 元数据：服务端写、客户端读
 // 流开始时写 model，结束时补 totalTokens —— 所以两个字段都是可选的
+// schema 用来推导类型（也可以交给 useChat 的 messageMetadataSchema 做运行时校验）
 export const messageMetadataSchema = z.object({
   model: z.string().optional(),
   totalTokens: z.number().optional(),
@@ -1654,10 +1655,10 @@ import {
   createUIMessageStreamResponse,
   streamText,
   toUIMessageStream,
-  type UIMessage,
 } from "ai";
 import { deepSeek } from "@ai-sdk/deepseek";
 import { searchKnowledge } from "@/lib/knowledge";
+import type { ChatMessage } from "@/lib/message-meta";
 
 export const maxDuration = 30;
 
@@ -1687,7 +1688,7 @@ export async function POST(req: Request) {
   const {
     messages,
     chatId = "default",
-  }: { messages: UIMessage[]; chatId?: string } = await req.json();
+  }: { messages: ChatMessage[]; chatId?: string } = await req.json();
 
   // 检索用的问题：取最后一条用户消息的文本
   const lastUser = messages.filter((message) => message.role === "user").pop();
