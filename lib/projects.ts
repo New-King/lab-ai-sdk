@@ -2079,7 +2079,18 @@ export default function Home() {
         "- 作用一：让 onEnd 拿到「历史 + 本轮回复」的完整 messages；不传则只有本轮回复，持久化会把记录截断成一条。",
         "- 作用二：若历史最后一条是 assistant（续写场景），SDK 会让本轮 start 复用那条的 messageId，语义为覆盖那条消息。",
         "- 本课失败那轮的 UI 表现：start 报文不带 messageId，前端不会立刻新建 assistant 消息，因此重试等价于「把最后一条用户消息再问一遍」。若希望失败也留下一条可替换的消息，可给 toUIMessageStream 传入 generateMessageId（如 ai 导出的 generateId）。",
-        "## 四、后端不用 AI SDK 时如何接入",
+        "## 四、失败那轮要不要写进历史",
+        "- 失败或中止时 onEnd 同样会触发。若不判断，就会把「历史 + 一条空回复」写进存档，刷新后这些空回复会在界面上渲染成空的消息气泡。",
+        "- 本课的做法：读 onEnd 回调参数里的 outcome（取值 completed / failed / aborted / unknown），只在 completed 时保存。",
+        "```",
+        "onEnd: ({ messages: finalMessages, outcome }) => {",
+        '  if (outcome.status !== "completed") return;',
+        "  void saveChat({ chatId, messages: finalMessages });",
+        "}",
+        "```",
+        "- 另外两种常见做法：保留用户消息、只丢弃失败的回复；或给消息加 status 字段标记失败，界面显示占位但不参与上下文。取舍取决于产品对「失败留痕」的要求。",
+        "- 补充：parts 为空的 assistant 消息在 convertToModelMessages 时会被丢弃，不会污染下次请求的上下文，主要影响是存档与界面。",
+        "## 五、后端不用 AI SDK 时如何接入",
         "- 与第 7 课延伸阅读同理：不依赖 AI SDK，按协议手写 Server-Sent Events 即可，前端 useChat 无需改动。",
         "- 后端只需做两件事：把 messages[].parts 中 type 为 text 的内容拼成模型输入（等价于 convertToModelMessages）；按下面的报文返回。",
         "```",
@@ -2098,10 +2109,11 @@ export default function Home() {
         "data: [DONE]",
         "```",
         '- 流必须以 data: [DONE] 收尾；出错时把中间部分换成 data: {"type":"error","errorText":"..."}。重试请求只是多一个 trigger 字段，按普通请求处理即可。',
-        "## 五、要点",
+        "## 六、要点",
         "- 重试的语义是「丢掉最后一条 assistant 回复，用同样的历史再生成一次」，前端已按此截断历史。",
         "- 后端是否要额外配合，取决于历史的来源：以请求体为准则无需处理；另有历史来源则需回滚最后一条 assistant 回复。",
         "- 错误文案与错误是否可见，都由服务端的 onError 决定。",
+        "- 持久化时按 outcome 判断，只保存成功的那一轮，失败留下的空回复就不会进入历史。",
       ],
     },
     docLinks: [
@@ -2185,7 +2197,9 @@ export async function POST(req: Request) {
         return "模型调用失败，请稍后重试";
       },
       // 流结束后存完整 messages
-      onEnd: ({ messages: finalMessages }) => {
+      onEnd: ({ messages: finalMessages, outcome }) => {
+        // 失败或中止的这轮不写入历史：否则存档里会留下一条空回复
+        if (outcome.status !== "completed") return;
         void saveChat({ chatId, messages: finalMessages });
       },
     }),
