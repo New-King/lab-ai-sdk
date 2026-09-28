@@ -23,11 +23,16 @@ export function ProjectView({ project }: { project: LabProject }) {
   const operations = getLabOperations(project.files);
   const [selectedId, setSelectedId] = useState(operations[0]?.id ?? "");
   const detailRef = useRef<HTMLElement>(null);
+  // 记录上一次滚动过的操作：进页面时（首次）不滚动，
+  // 否则代码区会被滚进视野，看起来像"页面自己往下移了一截"
+  const lastScrolledId = useRef(selectedId);
 
   const selected =
     operations.find((op) => op.id === selectedId) ?? operations[0];
 
   useEffect(() => {
+    if (lastScrolledId.current === selectedId) return;
+    lastScrolledId.current = selectedId;
     detailRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [selectedId]);
 
