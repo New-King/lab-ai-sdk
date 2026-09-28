@@ -505,12 +505,17 @@ export default function Home() {
     summary: "标准聊天界面 + useChat；消息存服务端（.chats/），刷新后从 API 加载。",
     concepts: [
       "useChat — 聊天 Hook：维护多轮消息、发送消息、流式渲染回复、支持中止",
+      "UIMessage — UI 层的消息类型：id、role 和 parts，内容都放在 parts 数组里，前端按 part.type 渲染",
       "DefaultChatTransport — useChat 的传输层（走 HTTP）：指定 api 地址，并随请求发送额外字段",
       "convertToModelMessages — 把 UI 消息转成模型能接收的 messages",
       "toUIMessageStream — 转 UI 消息流，用 originalMessages 与 onEnd 在流结束时拿到完整消息",
     ],
     docLinks: [
       { title: "useChat", href: "https://ai-sdk.dev/docs/ai-sdk-ui/chatbot" },
+      {
+        title: "UIMessage",
+        href: "https://ai-sdk.dev/docs/reference/ai-sdk-core/ui-message",
+      },
       {
         title: "Transport（DefaultChatTransport）",
         href: "https://ai-sdk.dev/docs/ai-sdk-ui/transport",
@@ -627,7 +632,9 @@ export async function POST(req: Request) {
     stream: toUIMessageStream({
       stream: result.stream,
       originalMessages: messages,
-      onEnd: ({ messages: finalMessages }) => {
+      onEnd: ({ messages: finalMessages, outcome }) => {
+        // 只保存成功结束的这轮（失败 / 中止不写）
+        if (outcome.status !== "completed") return;
         void saveChat({ chatId, messages: finalMessages });
       },
     }),
@@ -802,6 +809,8 @@ export default function Home() {
       "综合实战：tool 调用 + message.parts 渲染 React 组件（天气卡片），延续服务端持久化。",
     concepts: [
       "tool — 定义模型可调用的工具：description 说明用途、inputSchema 约束参数、execute 返回结果",
+      "part.state — tool part 的状态：input-available / approval-requested / approval-responded / output-available / output-error，页面按它渲染不同 UI",
+      "part.input / part.output — 模型生成的工具参数（input）与 execute 的返回值（output）",
       "needsApproval — 工具执行前先暂停，等用户批准（消息里出现 approval-requested 状态的 part）",
       "addToolApprovalResponse — useChat 返回的方法：批准或拒绝某个审批请求，然后继续生成",
       "lastAssistantMessageIsCompleteWithApprovalResponses — 审批响应齐全后自动接着生成",
@@ -829,6 +838,10 @@ export default function Home() {
         title: "useChat 参考",
         href: "https://ai-sdk.dev/docs/reference/ai-sdk-ui/use-chat",
       },
+      {
+        title: "InferUITools",
+        href: "https://ai-sdk.dev/docs/reference/ai-sdk-ui/infer-ui-tools",
+      },
     ],
     files: [
       {
@@ -836,7 +849,7 @@ export default function Home() {
         order: 1,
         action: "create",
         hint: "weather tool + tools 导出",
-        code: `import { tool } from "ai";
+        code: `import { tool, type InferUITools } from "ai";
 import { z } from "zod";
 
 // 普通工具：模型一调用就执行，结果直接渲染成卡片
@@ -873,7 +886,10 @@ export const weatherAlertTool = tool({
 export const tools = {
   displayWeather: weatherTool,
   sendWeatherAlert: weatherAlertTool,
-};`,
+};
+
+// 从工具定义推导出消息类型，前端渲染 tool part 时 output 才有类型
+export type ChatTools = InferUITools<typeof tools>;`,
       },
       {
         path: "components/weather.tsx",
@@ -963,7 +979,9 @@ export async function POST(req: Request) {
       stream: result.stream,
       originalMessages: messages,
       // 流结束后拿到完整的 UIMessage[]，写入存储
-      onEnd: ({ messages: finalMessages }) => {
+      onEnd: ({ messages: finalMessages, outcome }) => {
+        // 只保存成功结束的这轮（失败 / 中止不写）
+        if (outcome.status !== "completed") return;
         void saveChat({ chatId, messages: finalMessages });
       },
     }),
@@ -978,14 +996,19 @@ export async function POST(req: Request) {
         code: `"use client";
 
 import { Weather } from "@/components/weather";
+import type { ChatTools } from "@/lib/tools";
 import { useChat } from "@ai-sdk/react";
 import {
   DefaultChatTransport,
   lastAssistantMessageIsCompleteWithApprovalResponses,
+  type UIMessage,
 } from "ai";
 import { useEffect, useState } from "react";
 
 const CHAT_ID = "default";
+
+// 带上工具类型，tool part 的 input / output 才有类型（否则是 unknown）
+type ChatMessage = UIMessage<unknown, never, ChatTools>;
 
 export default function Home() {
   const {
@@ -997,7 +1020,7 @@ export default function Home() {
     error,
     // 审批用：批准 / 拒绝模型发起的工具调用
     addToolApprovalResponse,
-  } = useChat({
+  } = useChat<ChatMessage>({
     id: CHAT_ID,
     // 审批响应齐全后自动继续生成，不用再点一次发送
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
@@ -2088,6 +2111,7 @@ export default function Home() {
         "  void saveChat({ chatId, messages: finalMessages });",
         "}",
         "```",
+        "- 注意适用范围：这个判断依赖 toUIMessageStream 给出的 outcome（成功 completed / 失败 failed）。若改用第 7 课的手写 composer（createUIMessageStream），outcome 在成功时是 unknown（只有 execute 抛错才是 failed），照抄会把成功的轮次也一起跳过，需要另找判断依据。",
         "- 另外两种常见做法：保留用户消息、只丢弃失败的回复；或给消息加 status 字段标记失败，界面显示占位但不参与上下文。取舍取决于产品对「失败留痕」的要求。",
         "- 补充：parts 为空的 assistant 消息在 convertToModelMessages 时会被丢弃，不会污染下次请求的上下文，主要影响是存档与界面。",
         "## 五、后端不用 AI SDK 时如何接入",
